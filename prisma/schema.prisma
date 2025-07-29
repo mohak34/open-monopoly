@@ -1,0 +1,156 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String?
+  published Boolean  @default(false)
+  authorId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Monopoly Game Models
+model GameRoom {
+  id          String   @id @default(cuid())
+  name        String
+  boardSize   Int      // 40, 60, 80, or 100 tiles
+  maxPlayers  Int      @default(8)
+  status      GameStatus @default(WAITING)
+  hostId      String
+  settings    Json?    // Game settings JSON
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  players     Player[]
+  properties  Property[]
+  transactions Transaction[]
+  
+  @@map("game_rooms")
+}
+
+model Player {
+  id          String   @id @default(cuid())
+  name        String
+  color       String   // Player color/token
+  cash        Int      @default(1500)
+  position    Int      @default(0) // Current board position
+  inJail      Boolean  @default(false)
+  jailTurns   Int      @default(0)
+  isBankrupt  Boolean  @default(false)
+  isReady     Boolean  @default(false)
+  turnOrder   Int      // Order in which players take turns
+  
+  gameId      String
+  gameRoom    GameRoom @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  
+  ownedProperties Property[]
+  transactions Transaction[]
+  getOutOfJailFreeCards Int @default(0)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("players")
+}
+
+model Property {
+  id          String   @id @default(cuid())
+  name        String
+  type        PropertyType
+  position    Int      // Position on the board
+  price       Int?
+  rent        Int?
+  rentWithHouse Int?
+  rentWithHotel Int?
+  colorGroup  String?  // Color group for properties
+  houses      Int      @default(0)
+  hasHotel    Boolean  @default(false)
+  isMortgaged Boolean  @default(false)
+  
+  gameId      String
+  gameRoom    GameRoom @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  
+  ownerId     String?
+  owner       Player?  @relation(fields: [ownerId], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("properties")
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  type        TransactionType
+  amount      Int
+  fromPlayer  String?  // Player ID sending money
+  toPlayer    String?  // Player ID receiving money
+  description String   // Description of the transaction
+  
+  gameId      String
+  gameRoom    GameRoom @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  
+  playerId    String?  // Player ID involved in transaction
+  player      Player?  @relation(fields: [playerId], references: [id])
+  
+  createdAt   DateTime @default(now())
+  
+  @@map("transactions")
+}
+
+enum GameStatus {
+  WAITING
+  PLAYING
+  FINISHED
+}
+
+enum PropertyType {
+  PROPERTY
+  RAILROAD
+  UTILITY
+  TAX
+  GO
+  JAIL
+  FREE_PARKING
+  GO_TO_JAIL
+  CHANCE
+  COMMUNITY_CHEST
+}
+
+enum TransactionType {
+  BUY_PROPERTY
+  PAY_RENT
+  RECEIVE_RENT
+  PAY_TAX
+  COLLECT_GO
+  BUILD_HOUSE
+  BUILD_HOTEL
+  MORTGAGE
+  UNMORTGAGE
+  BANKRUPTCY
+  JAIL_FINE
+  CHANCE_CARD
+  COMMUNITY_CHEST_CARD
+}
