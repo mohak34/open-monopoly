@@ -14,13 +14,13 @@ import PropertyCard, { PropertyModal } from '@/components/PropertyCard';
 import TransactionHistory from '@/components/TransactionHistory';
 import ChatBox from '@/components/ChatBox';
 import AuctionComponent from '@/components/Auction';
-import { Player, GameRoom, Property, Auction, GameState } from '@/types/game';
+import { Player, type GameRoom, Property, Auction, GameState } from '@/types/game';
 
 export default function GameRoom() {
   const params = useParams();
   const roomId = params.id as string;
-  const [searchParams] = useState(new URLSearchParams(typeof window !== 'undefined' ? window.location.search : ''));
-  const playerId = searchParams.get('playerId') || '';
+  const [playerId, setPlayerId] = useState<string>('');
+  const [isClient, setIsClient] = useState(false);
   
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -37,59 +37,161 @@ export default function GameRoom() {
   const [currentAuction, setCurrentAuction] = useState<Auction | null>(null);
   const [showAuction, setShowAuction] = useState(false);
 
+  // Client-side only initialization
   useEffect(() => {
-    if (!roomId || !playerId) return;
+    setIsClient(true);
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const playerIdFromUrl = searchParams.get('playerId') || '';
+      setPlayerId(playerIdFromUrl);
+    }
+  }, []);
 
-    const newSocket = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3000', {
-      path: '/api/socketio',
-    });
+  useEffect(() => {
+    if (!isClient || !roomId || !playerId) {
+      if (isClient && (!roomId || !playerId)) {
+        console.warn('Missing roomId or playerId:', { roomId, playerId });
+        setError('Missing room ID or player ID. Please rejoin from the lobby.');
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 3000);
+      }
+      return;
+    }
 
-    newSocket.on('connect', () => {
-      setIsConnected(true);
-      newSocket.emit('join-room', { roomId, playerId });
-    });
+    console.log('Connecting to game room:', { roomId, playerId });
 
-    newSocket.on('disconnect', () => {
-      setIsConnected(false);
-    });
+    // Add a longer delay before connecting to ensure database operations are complete
+    const connectTimer = setTimeout(() => {
+      const newSocket = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3000', {
+        path: '/api/socketio',
+        forceNew: true, // Force new connection to avoid stale state
+      });
 
-    newSocket.on('room-updated', (data: GameState) => {
-      setGameState(data);
-      
-      const player = data.gameRoom.players.find(p => p.id === playerId);
-      setCurrentPlayer(player || null);
-      
-      setGameStarted(data.gameRoom.status === 'PLAYING');
-    });
+      newSocket.on('connect', () => {
+        console.log('Socket connected, joining room:', { roomId, playerId });
+        setIsConnected(true);
+        newSocket.emit('join-room', { roomId, playerId });
+      });
 
-    newSocket.on('error', (data: { message: string }) => {
-      setError(data.message);
-      setTimeout(() => setError(null), 3000);
-    });
+      newSocket.on('disconnect', () => {
+        console.log('Socket disconnected');
+        setIsConnected(false);
+      });
 
-    newSocket.on('auction-started', (data: { auction: Auction }) => {
-      setCurrentAuction(data.auction);
-      setShowAuction(true);
-    });
+      newSocket.on('room-updated', (data: GameState) => {
+        console.log('Room updated:', data);
+        console.log('Looking for playerId:', playerId);
+        console.log('Available players in room:', data.gameRoom.players.map(p => ({ id: p.id, name: p.name })));
+        setGameState(data);
+        
+        const player = data.gameRoom.players.find(p => p.id === playerId);
+        console.log('Found player in room:', player);
+        setCurrentPlayer(player || null);
+        
+        if (!player) {
+          console.warn('Player not found in room after update.');
+          console.warn('Searching for playerId:', playerId);
+          console.warn('Available players:', data.gameRoom.players.map(p => ({ id: p.id, name: p.name })));
+          
+          // Detailed debugging of player ID comparison
+          const idComparisons = data.gameRoom.players.map(p => ({
+            id: p.id,
+            searchId: playerId,
+            exactMatch: p.id === playerId,
+            stringMatch: String(p.id) === String(playerId),
+            idType: typeof p.id,
+            searchType: typeof playerId,
+            idLength: p.id?.length,
+            searchLength: playerId?.length,
+            trimmedMatch: p.id?.trim() === playerId?.trim()
+          }));
+          
+          console.warn('Detailed ID comparison:', idComparisons);
+          
+          // Try to find player with more flexible matching
+          const flexibleMatch = data.gameRoom.players.find(p => 
+            String(p.id).trim() === String(playerId).trim()
+          );
+          
+          if (flexibleMatch) {
+            console.warn('Found player with flexible matching:', flexibleMatch);
+            setCurrentPlayer(flexibleMatch);
+            setError(null);
+            console.log('Player successfully connected via flexible matching');
+            return;
+          }
+          
+          // Don't set error immediately - let other mechanisms handle this
+        } else {
+          // Player found successfully, clear any existing error
+          setError(null);
+          console.log('Player successfully connected and found in room');
+        }
+        
+        setGameStarted(data.gameRoom.status === 'PLAYING');
+      });
 
-    newSocket.on('bid-placed', (data: { auction: Auction; playerName: string; bidAmount: number }) => {
-      setCurrentAuction(data.auction);
-    });
+      newSocket.on('error', (data: { message: string }) => {
+        console.warn('Socket error:', data);
+        setError(data.message);
+        
+        // For "Player not found" errors, provide immediate redirect option
+        if (data.message.includes('Player not found in room')) {
+          setError(`${data.message} Click "Return to Lobby" to rejoin properly.`);
+          // Don't auto-redirect, let user choose
+        } else {
+          // For other errors, clear them after 5 seconds
+          setTimeout(() => setError(null), 5000);
+        }
+      });
 
-    newSocket.on('auction-ended', (data: { auction: Auction }) => {
-      setCurrentAuction(data.auction);
-      setTimeout(() => {
-        setShowAuction(false);
-        setCurrentAuction(null);
-      }, 5000);
-    });
+      newSocket.on('auction-started', (data: { auction: Auction }) => {
+        setCurrentAuction(data.auction);
+        setShowAuction(true);
+      });
 
-    setSocket(newSocket);
+      newSocket.on('bid-placed', (data: { auction: Auction; playerName: string; bidAmount: number }) => {
+        setCurrentAuction(data.auction);
+      });
+
+      newSocket.on('auction-ended', (data: { auction: Auction }) => {
+        setCurrentAuction(data.auction);
+        setTimeout(() => {
+          setShowAuction(false);
+          setCurrentAuction(null);
+        }, 5000);
+      });
+
+      setSocket(newSocket);
+
+      return () => {
+        newSocket.close();
+      };
+    }, 500); // Increased delay to ensure database operations are complete
 
     return () => {
-      newSocket.close();
+      clearTimeout(connectTimer);
     };
-  }, [roomId, playerId]);
+  }, [isClient, roomId, playerId]);
+
+  // Auto redirect if player not found in room (with delay to avoid race conditions)
+  useEffect(() => {
+    if (gameState && !currentPlayer && isClient && playerId && !error) {
+      console.log('Player not found in room, setting up redirect...');
+      // Increase delay to 8 seconds to allow more time for socket events
+      const timer = setTimeout(() => {
+        // Check that we still have gameState, no currentPlayer, and no error
+        if (gameState && !currentPlayer && !error) {
+          console.log('Player not found after delay - offering redirect option');
+          setError('Player not found in room. You may not be properly joined to this game room. Click "Return to Lobby" to rejoin properly.');
+          // Don't auto-redirect, let user decide
+        }
+      }, 8000); // Increased to 8 seconds
+      
+      return () => clearTimeout(timer);
+    }
+  }, [gameState, currentPlayer, isClient, playerId, error]);
 
   const startGame = async () => {
     if (!gameState || gameState.gameRoom.hostId !== playerId) return;
@@ -108,7 +210,7 @@ export default function GameRoom() {
         }
       }
     } catch (error) {
-      console.error('Error starting game:', error);
+      console.warn('Error starting game:', error);
     }
   };
 
@@ -202,10 +304,62 @@ export default function GameRoom() {
     }
   }, [landedProperty]);
 
-  if (!gameState) {
+  if (!isClient || !gameState) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <div className="text-white text-xl">Loading game room...</div>
+        <div className="text-center">
+          <div className="text-white text-xl mb-4">Loading game room...</div>
+          {isClient && !roomId && <div className="text-red-400">Error: No room ID provided</div>}
+          {isClient && !playerId && <div className="text-red-400">Error: No player ID provided</div>}
+          {isClient && roomId && playerId && !isConnected && (
+            <div className="text-yellow-400">Connecting to server...</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentPlayer && gameState) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <div className="text-center bg-slate-800 border border-slate-700 rounded-lg p-6 max-w-md">
+          <div className="text-white text-xl mb-4">Player not found in room</div>
+          <div className="text-gray-400 mb-6">
+            You may not be properly joined to this game room.
+            <br />
+            Please return to the lobby and rejoin the room properly.
+          </div>
+          <div className="space-x-4">
+            <button 
+              onClick={() => window.location.href = '/'}
+              className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded font-medium"
+            >
+              Return to Lobby
+            </button>
+            <button 
+              onClick={() => window.location.reload()}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded font-medium"
+            >
+              Refresh Page
+            </button>
+            <button 
+              onClick={() => {
+                // Clear any cached state and retry
+                setGameState(null);
+                setCurrentPlayer(null);
+                setError(null);
+                window.location.reload();
+              }}
+              className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded font-medium"
+            >
+              Reset & Retry
+            </button>
+          </div>
+          <div className="mt-4 text-sm text-gray-500">
+            Room ID: {roomId}<br />
+            Player ID: {playerId}
+          </div>
+        </div>
       </div>
     );
   }
@@ -234,7 +388,18 @@ export default function GameRoom() {
         {error && (
           <Alert className="mb-4 border-red-500 bg-red-900">
             <AlertTriangle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription className="flex items-center justify-between">
+              <span>{error}</span>
+              {(error.includes('Player not found') || error.includes('Missing room ID')) && (
+                <Button 
+                  onClick={() => window.location.href = '/'}
+                  className="ml-4 bg-purple-600 hover:bg-purple-700 text-sm"
+                  size="sm"
+                >
+                  Return to Lobby
+                </Button>
+              )}
+            </AlertDescription>
           </Alert>
         )}
 

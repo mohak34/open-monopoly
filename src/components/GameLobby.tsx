@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Users, Plus, Play } from 'lucide-react';
+import { Users, Plus, Play, Trash2 } from 'lucide-react';
 
 interface GameRoom {
   id: string;
@@ -79,6 +79,10 @@ export default function GameLobby() {
 
     try {
       const playerId = `player_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      console.log('Creating room with playerId:', playerId);
+      
+      // Create the room
       const response = await fetch('/api/game-rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -92,8 +96,10 @@ export default function GameLobby() {
 
       if (response.ok) {
         const room = await response.json();
+        console.log('Room created:', room);
         
-        await fetch('/api/game-rooms/join', {
+        // Join the room as the host
+        const joinResponse = await fetch('/api/game-rooms/join', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -104,10 +110,66 @@ export default function GameLobby() {
           })
         });
 
-        window.location.href = `/game/${room.id}?playerId=${playerId}`;
+        if (joinResponse.ok) {
+          const joinResult = await joinResponse.json();
+          console.log('Successfully joined room as host:', joinResult);
+          console.log('Host player details:', { playerId, name: createForm.playerName, color: createForm.playerColor });
+          
+          // Close the dialog and navigate
+          setShowCreateDialog(false);
+          // Reset form for next time
+          setCreateForm({
+            roomName: '',
+            boardSize: '40',
+            maxPlayers: '4',
+            playerName: '',
+            playerColor: playerColors[0]
+          });
+          
+          // Add a longer delay to ensure database operations are completed
+          setTimeout(() => {
+            console.log('Navigating to game room:', `/game/${room.id}?playerId=${playerId}`);
+            window.location.href = `/game/${room.id}?playerId=${playerId}`;
+          }, 1000);
+        } else {
+          const joinError = await joinResponse.json();
+          console.error('Error joining room as host:', joinError);
+          alert(`Failed to join room: ${joinError.error}`);
+        }
+      } else {
+        const roomError = await response.json();
+        console.error('Error creating room:', roomError);
+        alert(`Failed to create room: ${roomError.error}`);
       }
     } catch (error) {
       console.error('Error creating game room:', error);
+      alert('Failed to create room. Please try again.');
+    }
+  };
+
+  const deleteGameRoom = async (roomId: string) => {
+    if (!confirm('Are you sure you want to delete this room? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/game-rooms', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId })
+      });
+
+      if (response.ok) {
+        // Refresh the room list
+        fetchGameRooms();
+      } else {
+        const errorData = await response.json();
+        console.error('Error deleting room:', errorData.error);
+        alert(`Failed to delete room: ${errorData.error}`);
+      }
+    } catch (error) {
+      console.error('Error deleting game room:', error);
+      alert('Failed to delete room. Please try again.');
     }
   };
 
@@ -128,7 +190,23 @@ export default function GameLobby() {
       });
 
       if (response.ok) {
-        window.location.href = `/game/${selectedRoom.id}?playerId=${playerId}`;
+        const joinResult = await response.json();
+        console.log('Successfully joined room:', joinResult);
+        console.log('Player details:', { playerId, name: joinForm.playerName, color: joinForm.playerColor });
+        
+        // Close the dialog and navigate
+        setShowJoinDialog(false);
+        setSelectedRoom(null);
+        
+        // Add a longer delay to ensure database operations are completed
+        setTimeout(() => {
+          console.log('Navigating to game room:', `/game/${selectedRoom.id}?playerId=${playerId}`);
+          window.location.href = `/game/${selectedRoom.id}?playerId=${playerId}`;
+        }, 1000);
+      } else {
+        const errorData = await response.json();
+        console.error('Error joining room:', errorData.error);
+        alert(`Failed to join room: ${errorData.error}`);
       }
     } catch (error) {
       console.error('Error joining game room:', error);
@@ -243,18 +321,28 @@ export default function GameLobby() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {gameRooms.map((room) => (
             <Card key={room.id} className="bg-slate-800 border-slate-700">
-              <CardHeader>
-                <div className="flex justify-between items-start">
-                  <CardTitle className="text-white">{room.name}</CardTitle>
-                  <Badge variant={room.status === 'WAITING' ? 'default' : 'secondary'}>
-                    {room.status}
-                  </Badge>
-                </div>
-                <CardDescription className="text-gray-400">
-                  {room.boardSize} tiles • {room._count.players}/{room.maxPlayers} players
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+                <CardHeader>
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <CardTitle className="text-white">{room.name}</CardTitle>
+                      <CardDescription className="text-gray-400">
+                        {room.boardSize} tiles • {room._count.players}/{room.maxPlayers} players
+                      </CardDescription>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={room.status === 'WAITING' ? 'default' : 'secondary'}>
+                        {room.status}
+                      </Badge>
+                      <button
+                        onClick={() => deleteGameRoom(room.id)}
+                        className="text-red-400 hover:text-red-300 p-1 rounded hover:bg-red-900/20 transition-colors"
+                        title="Delete room"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </CardHeader>              <CardContent>
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 text-sm text-gray-300">
                     <Users className="w-4 h-4" />
@@ -274,11 +362,17 @@ export default function GameLobby() {
                     )}
                   </div>
 
-                  <Dialog open={showJoinDialog && selectedRoom?.id === room.id} onOpenChange={(open) => {
-                    setShowJoinDialog(open);
-                    if (open) setSelectedRoom(room);
-                  }}>
-                    <DialogTrigger asChild>
+                   <Dialog open={showJoinDialog && selectedRoom?.id === room.id} onOpenChange={(open) => {
+                     setShowJoinDialog(open);
+                     if (open) {
+                       setSelectedRoom(room);
+                       // Set default available color
+                       const availableColors = playerColors.filter(color => !room.players.some(p => p.color === color));
+                       if (availableColors.length > 0) {
+                         setJoinForm({...joinForm, playerColor: availableColors[0]});
+                       }
+                     }
+                   }}>                    <DialogTrigger asChild>
                       <Button 
                         className="w-full bg-purple-600 hover:bg-purple-700"
                         disabled={room.status !== 'WAITING' || room._count.players >= room.maxPlayers}
@@ -305,19 +399,18 @@ export default function GameLobby() {
                           />
                         </div>
 
-                        <div>
-                          <label className="block text-sm font-medium mb-1">Player Color</label>
-                          <div className="flex gap-2">
-                            {playerColors.map((color) => (
-                              <button
-                                key={color}
-                                className={`w-8 h-8 rounded-full ${color} ${joinForm.playerColor === color ? 'ring-2 ring-white' : ''}`}
-                                onClick={() => setJoinForm({...joinForm, playerColor: color})}
-                              />
-                            ))}
-                          </div>
-                        </div>
-
+                         <div>
+                           <label className="block text-sm font-medium mb-1">Player Color</label>
+                           <div className="flex gap-2">
+                             {playerColors.filter(color => !selectedRoom?.players.some(p => p.color === color)).map((color) => (
+                               <button
+                                 key={color}
+                                 className={`w-8 h-8 rounded-full ${color} ${joinForm.playerColor === color ? 'ring-2 ring-white' : ''}`}
+                                 onClick={() => setJoinForm({...joinForm, playerColor: color})}
+                               />
+                             ))}
+                           </div>
+                         </div>
                         <Button onClick={joinGameRoom} className="w-full bg-purple-600 hover:bg-purple-700">
                           Join Game
                         </Button>

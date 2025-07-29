@@ -40,23 +40,49 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const existingPlayer = gameRoom.players.find(p => p.id === playerId);
-    if (existingPlayer) {
+    // Check if this player ID already exists in this specific game room first
+    const existingPlayerInRoom = gameRoom.players.find(p => p.id === playerId);
+    if (existingPlayerInRoom) {
       return NextResponse.json(
-        { error: 'Player already in room' },
+        { error: 'Player already in this room' },
         { status: 400 }
       );
     }
 
-    const player = await db.player.create({
+    // Check if this player ID already exists in any OTHER game room
+    const existingPlayerAnywhere = await db.player.findUnique({
+      where: { id: playerId }
+    });
+
+    if (existingPlayerAnywhere && existingPlayerAnywhere.gameId !== roomId) {
+      return NextResponse.json(
+        { error: 'Player ID already exists in a different game' },
+        { status: 400 }
+      );
+    }
+
+    // Check if color is already taken
+    const colorTaken = gameRoom.players.find(p => p.color === playerColor);
+    if (colorTaken) {
+      return NextResponse.json(
+        { error: 'Player color already taken' },
+        { status: 400 }
+      );
+    }
+
+    await db.player.create({
       data: {
         id: playerId,
         name: playerName,
         color: playerColor,
         gameId: roomId,
         turnOrder: gameRoom.players.length,
+        isReady: gameRoom.hostId === playerId, // Host is automatically ready
       },
     });
+
+    // Add a small delay to ensure the database write is fully committed
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     const updatedRoom = await db.gameRoom.findUnique({
       where: { id: roomId },

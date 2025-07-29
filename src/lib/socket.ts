@@ -13,6 +13,7 @@ interface Player {
   isBankrupt: boolean;
   jailTurns: number;
   turnOrder: number;
+  getOutOfJailFreeCards: number;
 }
 
 interface GameRoom {
@@ -23,7 +24,6 @@ interface GameRoom {
   status: 'WAITING' | 'PLAYING' | 'FINISHED';
   players: Player[];
   hostId: string;
-  currentPlayerIndex: number;
 }
 
 interface Property {
@@ -371,14 +371,93 @@ function calculateRent(property: Property, ownedInGroup: number = 0): number {
 }
 
 export const setupSocket = (io: Server) => {
+  
+  // Store the io instance for use in other functions
   io.on('connection', (socket) => {
     console.log('Client connected:', socket.id);
 
     socket.on('join-room', async ({ roomId, playerId }) => {
       try {
         socket.join(roomId);
+        console.log(`Player ${playerId} attempting to join room ${roomId}`);
         
-        const gameRoom = await db.gameRoom.findUnique({
+        // Retry mechanism with exponential backoff for database synchronization
+        const maxRetries = 7; // Increased retries
+        let retryCount = 0;
+        
+        const attemptJoin = async (): Promise<void> => {
+          const delay = Math.min(150 * Math.pow(1.5, retryCount), 3000); // Longer delays: 150ms, 225ms, 337ms, 506ms, 759ms, 1138ms, 1707ms
+          if (retryCount > 0) {
+            console.log(`Retry attempt ${retryCount} for player ${playerId} in room ${roomId} (waiting ${delay}ms)`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+          
+          const gameRoom = await db.gameRoom.findUnique({
+            where: { id: roomId },
+            include: {
+              players: {
+                select: {
+                  id: true,
+                  name: true,
+                  color: true,
+                  cash: true,
+                  position: true,
+                  inJail: true,
+                  isReady: true,
+                  isBankrupt: true,
+                  jailTurns: true,
+                  turnOrder: true,
+                  getOutOfJailFreeCards: true,
+                },
+              },
+            },
+          });
+
+          if (!gameRoom) {
+            console.error(`Game room ${roomId} not found`);
+            socket.emit('error', { message: 'Game room not found' });
+            return;
+          }
+
+          // Check if player exists in the room
+          const playerInRoom = gameRoom.players.find(p => p.id === playerId);
+          if (!playerInRoom) {
+            console.error(`Player ${playerId} not found in room ${roomId} (attempt ${retryCount + 1}/${maxRetries})`);
+            console.error(`Available players:`, gameRoom.players.map(p => ({ id: p.id, name: p.name })));
+            console.error(`Looking for exact match with playerId: "${playerId}"`);
+            console.error(`Player ID types:`, gameRoom.players.map(p => ({ id: p.id, type: typeof p.id })));
+            
+            if (retryCount < maxRetries - 1) {
+              retryCount++;
+              return attemptJoin();
+            } else {
+              // Final attempt failed
+              console.error(`Player ${playerId} not found after ${maxRetries} attempts. Sending error.`);
+              socket.emit('error', { message: 'Player not found in room. Please rejoin from the lobby.' });
+              return;
+            }
+          }
+
+          console.log(`Player ${playerId} found in room ${roomId}:`, playerInRoom.name);
+          await handleSuccessfulJoin(socket, roomId, playerId, gameRoom);
+        };
+        
+        await attemptJoin();
+
+      } catch (error) {
+        console.error('Error joining room:', error);
+        socket.emit('error', { message: 'Failed to join room' });
+      }
+    });
+
+    async function handleSuccessfulJoin(socket: any, roomId: string, playerId: string, gameRoom: any) {
+      try {
+        const properties = await db.property.findMany({
+          where: { gameId: roomId },
+        });
+
+        // Always fetch fresh data from database to ensure we have the latest players
+        const freshGameRoom = await db.gameRoom.findUnique({
           where: { id: roomId },
           include: {
             players: {
@@ -393,55 +472,67 @@ export const setupSocket = (io: Server) => {
                 isBankrupt: true,
                 jailTurns: true,
                 turnOrder: true,
+                getOutOfJailFreeCards: true,
               },
             },
           },
         });
 
-        const properties = await db.property.findMany({
-          where: { gameId: roomId },
-        });
-
-        if (gameRoom) {
-          let gameState = gameRooms.get(roomId);
-          
-          if (!gameState) {
-            gameState = {
-              gameRoom: {
-                ...gameRoom,
-                players: gameRoom.players.map(p => ({
-                  ...p,
-                  cash: Number(p.cash),
-                  position: Number(p.position),
-                  jailTurns: Number(p.jailTurns),
-                  turnOrder: Number(p.turnOrder),
-                })),
-                currentPlayerIndex: 0,
-              },
-              properties: properties.map(p => ({
-                ...p,
-                price: p.price ? Number(p.price) : undefined,
-                rent: p.rent ? Number(p.rent) : undefined,
-                rentWithHouse: p.rentWithHouse ? Number(p.rentWithHouse) : undefined,
-                rentWithHotel: p.rentWithHotel ? Number(p.rentWithHotel) : undefined,
-                houses: Number(p.houses),
-              })),
-              currentPlayerTurn: gameRoom.players[0]?.id || '',
-              diceRolled: false,
-              lastDiceRoll: [0, 0],
-              gameMessage: 'Game started! Good luck!',
-            };
-            gameRooms.set(roomId, gameState);
-          }
-
-          socket.emit('room-updated', gameState);
-          socket.to(roomId).emit('room-updated', gameState);
+        if (!freshGameRoom) {
+          console.error('Fresh game room not found');
+          socket.emit('error', { message: 'Game room not found' });
+          return;
         }
+
+        console.log(`Fresh room data contains ${freshGameRoom.players.length} players:`, 
+                   freshGameRoom.players.map(p => ({ id: p.id, name: p.name })));
+
+        // Create or update gameState with fresh data
+        const gameState = {
+          gameRoom: {
+            id: freshGameRoom.id,
+            name: freshGameRoom.name,
+            boardSize: freshGameRoom.boardSize,
+            maxPlayers: freshGameRoom.maxPlayers,
+            status: freshGameRoom.status,
+            hostId: freshGameRoom.hostId,
+            players: freshGameRoom.players.map((p: any) => ({
+              ...p,
+              cash: Number(p.cash),
+              position: Number(p.position),
+              jailTurns: Number(p.jailTurns),
+              turnOrder: Number(p.turnOrder),
+              getOutOfJailFreeCards: Number(p.getOutOfJailFreeCards || 0),
+            })),
+          },
+          properties: properties.map((p: any) => ({
+            ...p,
+            price: p.price ? Number(p.price) : undefined,
+            rent: p.rent ? Number(p.rent) : undefined,
+            rentWithHouse: p.rentWithHouse ? Number(p.rentWithHouse) : undefined,
+            rentWithHotel: p.rentWithHotel ? Number(p.rentWithHotel) : undefined,
+            houses: Number(p.houses),
+          })),
+          currentPlayerTurn: freshGameRoom.players[0]?.id || '',
+          diceRolled: false,
+          lastDiceRoll: [0, 0] as [number, number],
+          gameMessage: 'Game started! Good luck!',
+        };
+
+        // Update the cache with fresh data
+        gameRooms.set(roomId, gameState);
+
+        console.log(`Sending room update to player ${playerId}`);
+        console.log(`GameState contains ${gameState.gameRoom.players.length} players:`, 
+                   gameState.gameRoom.players.map(p => ({ id: p.id, name: p.name })));
+        
+        socket.emit('room-updated', gameState);
+        socket.to(roomId).emit('room-updated', gameState);
       } catch (error) {
-        console.error('Error joining room:', error);
-        socket.emit('error', { message: 'Failed to join room' });
+        console.error('Error in handleSuccessfulJoin:', error);
+        socket.emit('error', { message: 'Failed to complete room join' });
       }
-    });
+    }
 
     socket.on('player-ready', async ({ roomId, playerId, isReady }) => {
       try {
@@ -465,6 +556,7 @@ export const setupSocket = (io: Server) => {
                 isBankrupt: true,
                 jailTurns: true,
                 turnOrder: true,
+                  getOutOfJailFreeCards: true,
               },
             },
           },
@@ -478,13 +570,19 @@ export const setupSocket = (io: Server) => {
           const gameState = gameRooms.get(roomId);
           if (gameState) {
             gameState.gameRoom = {
-              ...gameRoom,
+              id: gameRoom.id,
+              name: gameRoom.name,
+              boardSize: gameRoom.boardSize,
+              maxPlayers: gameRoom.maxPlayers,
+              status: gameRoom.status,
+              hostId: gameRoom.hostId,
               players: gameRoom.players.map(p => ({
                 ...p,
                 cash: Number(p.cash),
                 position: Number(p.position),
                 jailTurns: Number(p.jailTurns),
                 turnOrder: Number(p.turnOrder),
+                getOutOfJailFreeCards: Number(p.getOutOfJailFreeCards || 0),
               })),
             };
             
@@ -894,6 +992,7 @@ export const setupSocket = (io: Server) => {
                 isBankrupt: true,
                 jailTurns: true,
                 turnOrder: true,
+                  getOutOfJailFreeCards: true,
               },
             },
           },
@@ -914,6 +1013,7 @@ export const setupSocket = (io: Server) => {
                 position: Number(p.position),
                 jailTurns: Number(p.jailTurns),
                 turnOrder: Number(p.turnOrder),
+                getOutOfJailFreeCards: Number(p.getOutOfJailFreeCards || 0),
               })),
             };
             
@@ -1324,10 +1424,10 @@ export const setupSocket = (io: Server) => {
           for (const propertyId of tradeProposal.offeredProperties) {
             const property = gameState.properties.find(p => p.id === propertyId);
             if (property) {
-              property.ownerId = toPlayerId;
+              property.ownerId = tradeProposal.toPlayerId;
               await db.property.update({
                 where: { id: propertyId },
-                data: { ownerId: toPlayerId },
+                data: { ownerId: tradeProposal.toPlayerId },
               });
             }
           }
@@ -1335,22 +1435,22 @@ export const setupSocket = (io: Server) => {
           for (const propertyId of tradeProposal.requestedProperties) {
             const property = gameState.properties.find(p => p.id === propertyId);
             if (property) {
-              property.ownerId = fromPlayerId;
+              property.ownerId = tradeProposal.fromPlayerId;
               await db.property.update({
                 where: { id: propertyId },
-                data: { ownerId: fromPlayerId },
+                data: { ownerId: tradeProposal.fromPlayerId },
               });
             }
           }
 
           // Update player cash in database
           await db.player.update({
-            where: { id: fromPlayerId },
+            where: { id: tradeProposal.fromPlayerId },
             data: { cash: fromPlayer.cash },
           });
 
           await db.player.update({
-            where: { id: toPlayerId },
+            where: { id: tradeProposal.toPlayerId },
             data: { cash: toPlayer.cash },
           });
 
@@ -1359,11 +1459,11 @@ export const setupSocket = (io: Server) => {
             data: {
               type: TransactionType.BUY_PROPERTY, // Using this as a general trade transaction
               amount: tradeProposal.offeredCash,
-              fromPlayer: fromPlayerId,
-              toPlayer: toPlayerId,
+              fromPlayer: tradeProposal.fromPlayerId,
+              toPlayer: tradeProposal.toPlayerId,
               description: `Trade: ${fromPlayer.name} to ${toPlayer.name}`,
               gameId: roomId,
-              playerId: fromPlayerId,
+              playerId: tradeProposal.fromPlayerId,
             },
           });
 
@@ -1377,8 +1477,8 @@ export const setupSocket = (io: Server) => {
         tradeProposals.set(tradeId, tradeProposal);
         
         // Notify both players about the trade result
-        io.to(fromPlayerId).emit('trade-resolved', { tradeProposal, accepted: accept });
-        io.to(toPlayerId).emit('trade-resolved', { tradeProposal, accepted: accept });
+        io.to(tradeProposal.fromPlayerId).emit('trade-resolved', { tradeProposal, accepted: accept });
+        io.to(tradeProposal.toPlayerId).emit('trade-resolved', { tradeProposal, accepted: accept });
         
         gameRooms.set(roomId, gameState);
         io.to(roomId).emit('room-updated', gameState);
@@ -1615,7 +1715,7 @@ export const setupSocket = (io: Server) => {
         setTimeout(async () => {
           const currentAuction = activeAuctions.get(auctionId);
           if (currentAuction && currentAuction.status === 'ACTIVE') {
-            await endAuction(roomId, auctionId);
+            await endAuction(roomId, auctionId, io);
           }
         }, 30000);
 
@@ -1684,7 +1784,7 @@ export const setupSocket = (io: Server) => {
   });
 };
 
-async function endAuction(roomId: string, auctionId: string) {
+async function endAuction(roomId: string, auctionId: string, io: Server) {
   try {
     const gameState = gameRooms.get(roomId);
     const auction = activeAuctions.get(auctionId);
