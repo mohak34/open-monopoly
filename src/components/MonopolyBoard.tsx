@@ -2,6 +2,81 @@
 
 import { Property } from '@/types/game';
 
+  // World cities data for monopoly board positions
+  const WORLD_CITIES_DATA: Record<number, { 
+    name: string; 
+    type: string; 
+    colorGroup?: string; 
+    country?: string; 
+    city?: null; 
+  }> = {
+  // Corner squares
+  0: { name: 'GO', type: 'special', city: null },
+  10: { name: 'JAIL', type: 'special', city: null },
+  20: { name: 'FREE PARKING', type: 'special', city: null },
+  30: { name: 'GO TO JAIL', type: 'special', city: null },
+  
+  // Brown group (Mediterranean/Baltic)
+  1: { name: 'Mumbai', type: 'property', colorGroup: 'brown', country: 'India' },
+  3: { name: 'Cairo', type: 'property', colorGroup: 'brown', country: 'Egypt' },
+  
+  // Light Blue group (Oriental/Vermont/Connecticut)
+  6: { name: 'Bangkok', type: 'property', colorGroup: 'lightblue', country: 'Thailand' },
+  8: { name: 'Singapore', type: 'property', colorGroup: 'lightblue', country: 'Singapore' },
+  9: { name: 'Manila', type: 'property', colorGroup: 'lightblue', country: 'Philippines' },
+  
+  // Pink group (St. Charles/States/Virginia)
+  11: { name: 'Sydney', type: 'property', colorGroup: 'pink', country: 'Australia' },
+  13: { name: 'Auckland', type: 'property', colorGroup: 'pink', country: 'New Zealand' },
+  14: { name: 'Melbourne', type: 'property', colorGroup: 'pink', country: 'Australia' },
+  
+  // Orange group (St. James/Tennessee/New York)
+  16: { name: 'Tokyo', type: 'property', colorGroup: 'orange', country: 'Japan' },
+  18: { name: 'Seoul', type: 'property', colorGroup: 'orange', country: 'South Korea' },
+  19: { name: 'Hong Kong', type: 'property', colorGroup: 'orange', country: 'Hong Kong' },
+  
+  // Red group (Kentucky/Indiana/Illinois)
+  21: { name: 'London', type: 'property', colorGroup: 'red', country: 'UK' },
+  23: { name: 'Paris', type: 'property', colorGroup: 'red', country: 'France' },
+  24: { name: 'Berlin', type: 'property', colorGroup: 'red', country: 'Germany' },
+  
+  // Yellow group (Atlantic/Ventnor/Marvin)
+  26: { name: 'Dubai', type: 'property', colorGroup: 'yellow', country: 'UAE' },
+  27: { name: 'Istanbul', type: 'property', colorGroup: 'yellow', country: 'Turkey' },
+  29: { name: 'Moscow', type: 'property', colorGroup: 'yellow', country: 'Russia' },
+  
+  // Green group (Pacific/North Carolina/Pennsylvania)
+  31: { name: 'New York', type: 'property', colorGroup: 'green', country: 'USA' },
+  32: { name: 'Los Angeles', type: 'property', colorGroup: 'green', country: 'USA' },
+  34: { name: 'Toronto', type: 'property', colorGroup: 'green', country: 'Canada' },
+  
+  // Blue group (Park Place/Boardwalk)
+  37: { name: 'Zurich', type: 'property', colorGroup: 'blue', country: 'Switzerland' },
+  39: { name: 'Monaco', type: 'property', colorGroup: 'blue', country: 'Monaco' },
+  
+  // Railroads
+  5: { name: 'International Airport', type: 'railroad', city: null },
+  15: { name: 'Train Station', type: 'railroad', city: null },
+  25: { name: 'Subway System', type: 'railroad', city: null },
+  35: { name: 'High-Speed Rail', type: 'railroad', city: null },
+  
+  // Utilities
+  12: { name: 'Global Electric', type: 'utility', city: null },
+  28: { name: 'World Water Works', type: 'utility', city: null },
+  
+  // Tax squares
+  4: { name: 'Income Tax', type: 'tax', city: null },
+  38: { name: 'Luxury Tax', type: 'tax', city: null },
+  
+  // Chance/Community Chest
+  2: { name: 'Community Chest', type: 'chance', city: null },
+  7: { name: 'Chance', type: 'chance', city: null },
+  17: { name: 'Community Chest', type: 'chance', city: null },
+  22: { name: 'Chance', type: 'chance', city: null },
+  33: { name: 'Community Chest', type: 'chance', city: null },
+  36: { name: 'Chance', type: 'chance', city: null },
+};
+
 interface MonopolyBoardProps {
   boardSize: number;
   properties: Property[];
@@ -69,7 +144,32 @@ function Tile({ property, position, players, isCorner = false, onClick }: TilePr
     }
   };
 
+  const getCityData = (position: number) => {
+    return WORLD_CITIES_DATA[position as keyof typeof WORLD_CITIES_DATA] || null;
+  };
+
   const getTileContent = () => {
+    const cityData = getCityData(position);
+    
+    if (cityData) {
+      // For special squares
+      if (cityData.type === 'special') {
+        if (position === 0) return 'GO';
+        if (position === 10) return 'JAIL';
+        if (position === 20) return 'FREE\nPARKING';
+        if (position === 30) return 'GO TO\nJAIL';
+      }
+      
+      // For properties, show city name
+      if (cityData.type === 'property') {
+        return cityData.name;
+      }
+      
+      // For railroads, utilities, etc.
+      return cityData.name;
+    }
+    
+    // Fallback to original logic
     if (!property) return '';
     
     if (property.type === 'GO') return 'GO';
@@ -98,6 +198,16 @@ function Tile({ property, position, players, isCorner = false, onClick }: TilePr
         {getTileContent()}
       </div>
       
+      {/* Show country for international cities */}
+      {(() => {
+        const cityData = getCityData(position);
+        return cityData?.country && cityData.type === 'property' && (
+          <div className="absolute bottom-3 left-0 right-0 text-[6px] text-gray-300 px-1">
+            {cityData.country}
+          </div>
+        );
+      })()}
+      
       {property?.price && (
         <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-[6px]">
           ${property.price}
@@ -108,7 +218,7 @@ function Tile({ property, position, players, isCorner = false, onClick }: TilePr
         <div className="absolute top-0 right-0 w-2 h-2 rounded-full bg-white border border-gray-800" />
       )}
       
-      {property?.houses > 0 && (
+      {property && property.houses && property.houses > 0 && (
         <div className="absolute top-1 left-1 text-[6px]">
           🏠{property.houses}
         </div>
@@ -141,8 +251,20 @@ function Tile({ property, position, players, isCorner = false, onClick }: TilePr
 export default function MonopolyBoard({ boardSize, properties, players, currentPlayerTurn, onTileClick }: MonopolyBoardProps) {
   const propertyMap = new Map(properties.map(p => [p.position, p]));
   
-  const createBoardLayout = () => {
-    const tiles = [];
+  const createBoardLayout = (): Array<{
+    position: number;
+    property: Property | null;
+    isCorner: boolean;
+    side: string;
+    index: number;
+  }> => {
+    const tiles: Array<{
+      position: number;
+      property: Property | null;
+      isCorner: boolean;
+      side: string;
+      index: number;
+    }> = [];
     const sideLength = Math.floor(boardSize / 4);
     
     // Top row (left to right)
@@ -210,20 +332,19 @@ export default function MonopolyBoard({ boardSize, properties, players, currentP
   };
 
   return (
-    <div className="bg-green-800 p-4 rounded-lg shadow-2xl border-4 border-amber-800">
-      <div className="relative">
-        {/* Board grid - using CSS Grid for better layout */}
-        <div 
-          className="grid gap-0 bg-green-700 p-2 rounded"
-          style={{
-            gridTemplateColumns: `repeat(${sideLength}, 1fr)`,
-            gridTemplateRows: `repeat(${sideLength}, 1fr)`,
-            width: `${sideLength * 3.5}rem`,
-            height: `${sideLength * 3.5}rem`,
-            maxWidth: '100%',
-            maxHeight: '80vh',
-          }}
-        >
+    <div className="w-full h-full flex items-center justify-center p-2">
+      <div className="bg-green-800 p-2 rounded-lg shadow-2xl border-4 border-amber-800 max-w-full max-h-full">
+        <div className="relative">
+          {/* Board grid - using CSS Grid for better layout */}
+          <div 
+            className="grid gap-0 bg-green-700 p-2 rounded"
+            style={{
+              gridTemplateColumns: `repeat(${sideLength}, 1fr)`,
+              gridTemplateRows: `repeat(${sideLength}, 1fr)`,
+              width: `min(90vw, 90vh, ${sideLength * 4}rem)`,
+              height: `min(90vw, 90vh, ${sideLength * 4}rem)`,
+            }}
+          >
           {/* Top row */}
           {boardTiles.filter(tile => tile.side === 'top').map((tile) => (
             <div 
@@ -305,6 +426,7 @@ export default function MonopolyBoard({ boardSize, properties, players, currentP
               <div className="text-xs opacity-75">Current Turn: {players.find(p => p.id === currentPlayerTurn)?.name || 'Unknown'}</div>
             </div>
           </div>
+        </div>
         </div>
         
         {/* Player indicators */}

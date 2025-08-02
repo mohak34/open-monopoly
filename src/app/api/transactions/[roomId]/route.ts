@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { roomId: string } }
+  { params }: { params: { roomId: string } },
 ) {
   try {
     const roomId = params.roomId;
@@ -31,12 +31,12 @@ export async function GET(
         },
       },
       orderBy: {
-        createdAt: 'desc',
+        createdAt: "desc",
       },
       take: 50, // Limit to last 50 transactions
     });
 
-    const formattedTransactions = transactions.map(transaction => ({
+    const formattedTransactions = transactions.map((transaction) => ({
       id: transaction.id,
       type: transaction.type,
       amount: transaction.amount,
@@ -49,10 +49,11 @@ export async function GET(
 
     return NextResponse.json(formattedTransactions);
   } catch (error) {
-    console.error('Error fetching transactions:', error);
+    console.error("Error fetching transactions:", error);
     return NextResponse.json(
-      { error: 'Failed to fetch transactions' },
-      { status: 500 }
+      { error: "Failed to fetch transactions" },
+      { status: 500 },
     );
   }
 }
+

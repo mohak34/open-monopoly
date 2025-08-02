@@ -272,9 +272,11 @@ export default function GameRoom() {
     }
   };
 
-  const viewProperty = (property: Property) => {
-    setCurrentProperty(property);
-    setShowPropertyModal(true);
+  const viewProperty = (property: Property | null) => {
+    if (property) {
+      setCurrentProperty(property);
+      setShowPropertyModal(true);
+    }
   };
 
   const canStartGame = gameState && 
@@ -365,8 +367,8 @@ export default function GameRoom() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4 flex flex-col">
+      <div className="max-w-7xl mx-auto flex-1 flex flex-col">
         <div className="flex justify-between items-center mb-6">
           <div>
             <h1 className="text-3xl font-bold text-white">{gameState.gameRoom.name}</h1>
@@ -507,56 +509,44 @@ export default function GameRoom() {
             </div>
           </div>
         ) : (
-          <div className="space-y-6">
-            {/* Game Message */}
-            <Card className="bg-slate-800 border-slate-700">
-              <CardContent className="p-4">
-                <div className="text-center text-white font-medium">
-                  {gameState.gameMessage}
-                </div>
-              </CardContent>
-            </Card>
+          <div className="h-full flex gap-4">
+            {/* Left Sidebar */}
+            <div className="w-80 flex-shrink-0 space-y-4 overflow-y-auto">
+              {/* Game Message */}
+              <Card className="bg-slate-800 border-slate-700">
+                <CardContent className="p-3">
+                  <div className="text-center text-white font-medium text-sm">
+                    {gameState.gameMessage}
+                  </div>
+                </CardContent>
+              </Card>
 
-            {/* Game Board */}
-            <div className="flex justify-center">
-              <MonopolyBoard
-                boardSize={gameState.gameRoom.boardSize}
-                properties={gameState.properties}
-                players={gameState.gameRoom.players}
-                currentPlayerTurn={gameState.currentPlayerTurn}
-              />
-            </div>
-
-            {/* Game Controls */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Current Player Info */}
               <Card className="bg-slate-800 border-slate-700">
-                <CardHeader>
-                  <CardTitle className="text-white flex items-center gap-2">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-white flex items-center gap-2 text-sm">
                     <div className={`w-4 h-4 rounded-full ${currentPlayer?.color}`} />
                     {currentPlayer?.name}
                     {isMyTurn && ' (Your Turn)'}
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-300">Cash:</span>
-                      <span className="text-white font-medium">${currentPlayer?.cash.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-300">Position:</span>
-                      <span className="text-white font-medium">{currentPlayer?.position}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-300">Status:</span>
-                      <div className="flex items-center gap-1">
-                        {currentPlayer?.inJail && <span className="text-yellow-500">🔒 In Jail</span>}
-                        {currentPlayer?.isBankrupt && <span className="text-red-500">💀 Bankrupt</span>}
-                        {!currentPlayer?.inJail && !currentPlayer?.isBankrupt && (
-                          <span className="text-green-500">✓ Active</span>
-                        )}
-                      </div>
+                <CardContent className="space-y-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-300">Cash:</span>
+                    <span className="text-white font-medium">${currentPlayer?.cash.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-300">Position:</span>
+                    <span className="text-white font-medium">{currentPlayer?.position}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-300">Status:</span>
+                    <div className="flex items-center gap-1">
+                      {currentPlayer?.inJail && <span className="text-yellow-500 text-xs">🔒 In Jail</span>}
+                      {currentPlayer?.isBankrupt && <span className="text-red-500 text-xs">💀 Bankrupt</span>}
+                      {!currentPlayer?.inJail && !currentPlayer?.isBankrupt && (
+                        <span className="text-green-500 text-xs">✓ Active</span>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -564,14 +554,14 @@ export default function GameRoom() {
 
               {/* Game Actions */}
               <Card className="bg-slate-800 border-slate-700">
-                <CardHeader>
-                  <CardTitle className="text-white">Actions</CardTitle>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-white text-sm">Actions</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
                     {gameState.diceRolled && (
                       <div className="text-center">
-                        <div className="text-white mb-2">Last Roll:</div>
+                        <div className="text-white mb-2 text-sm">Last Roll:</div>
                         <div className="flex justify-center gap-2">
                           <div className="w-8 h-8 bg-white rounded flex items-center justify-center text-black font-bold">
                             {gameState.lastDiceRoll[0]}
@@ -580,7 +570,7 @@ export default function GameRoom() {
                             {gameState.lastDiceRoll[1]}
                           </div>
                         </div>
-                        <div className="text-white mt-1">
+                        <div className="text-white mt-1 text-sm">
                           Total: {gameState.lastDiceRoll[0] + gameState.lastDiceRoll[1]}
                         </div>
                       </div>
@@ -588,32 +578,35 @@ export default function GameRoom() {
                     
                     {currentPlayer?.inJail && (
                       <div className="bg-yellow-900 border border-yellow-600 rounded-lg p-3">
-                        <div className="text-yellow-200 text-sm font-medium mb-2">
+                        <div className="text-yellow-200 text-xs font-medium mb-2">
                           🔒 You are in jail! ({currentPlayer.jailTurns}/3 attempts)
                         </div>
                         <div className="space-y-2">
                           {canRollDice && (
                             <Button
                               onClick={rollDice}
-                              className="w-full bg-blue-600 hover:bg-blue-700"
+                              className="w-full bg-blue-600 hover:bg-blue-700 text-sm"
+                              size="sm"
                             >
-                              <Dice className="w-4 h-4 mr-2" />
+                              <Dice className="w-3 h-3 mr-2" />
                               Roll for Doubles
                             </Button>
                           )}
                           {canPayBail && (
                             <Button
                               onClick={payBail}
-                              className="w-full bg-yellow-600 hover:bg-yellow-700"
+                              className="w-full bg-yellow-600 hover:bg-yellow-700 text-sm"
+                              size="sm"
                             >
-                              <DollarSign className="w-4 h-4 mr-2" />
+                              <DollarSign className="w-3 h-3 mr-2" />
                               Pay $50 Bail
                             </Button>
                           )}
                           {canUseJailCard && (
                             <Button
                               onClick={useGetOutOfJailCard}
-                              className="w-full bg-green-600 hover:bg-green-700"
+                              className="w-full bg-green-600 hover:bg-green-700 text-sm"
+                              size="sm"
                             >
                               🎫 Use Jail Free Card
                             </Button>
@@ -625,9 +618,10 @@ export default function GameRoom() {
                     {canRollDice && !currentPlayer?.inJail && (
                       <Button
                         onClick={rollDice}
-                        className="w-full bg-blue-600 hover:bg-blue-700"
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-sm"
+                        size="sm"
                       >
-                        <Dice className="w-4 h-4 mr-2" />
+                        <Dice className="w-3 h-3 mr-2" />
                         Roll Dice
                       </Button>
                     )}
@@ -635,7 +629,8 @@ export default function GameRoom() {
                     {canEndTurn && (
                       <Button
                         onClick={endTurn}
-                        className="w-full bg-gray-600 hover:bg-gray-700"
+                        className="w-full bg-gray-600 hover:bg-gray-700 text-sm"
+                        size="sm"
                       >
                         End Turn
                       </Button>
@@ -646,15 +641,15 @@ export default function GameRoom() {
 
               {/* Players List */}
               <Card className="bg-slate-800 border-slate-700">
-                <CardHeader>
-                  <CardTitle className="text-white">Players</CardTitle>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-white text-sm">Players</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
                     {gameState.gameRoom.players.map((player) => (
                       <div
                         key={player.id}
-                        className={`flex items-center justify-between p-2 rounded ${
+                        className={`flex items-center justify-between p-2 rounded text-sm ${
                           player.id === gameState.currentPlayerTurn
                             ? 'bg-slate-600'
                             : 'bg-slate-700'
@@ -662,7 +657,7 @@ export default function GameRoom() {
                       >
                         <div className="flex items-center gap-2">
                           <div className={`w-3 h-3 rounded-full ${player.color}`} />
-                          <span className="text-white text-sm">
+                          <span className="text-white text-xs">
                             {player.name}
                             {player.id === playerId && ' (You)'}
                           </span>
@@ -675,6 +670,71 @@ export default function GameRoom() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Chat Section */}
+              {showChat && (
+                <Card className="bg-slate-800 border-slate-700">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-white text-sm flex items-center justify-between">
+                      💬 Chat
+                      <Button
+                        onClick={() => setShowChat(false)}
+                        className="bg-gray-600 hover:bg-gray-700 text-xs"
+                        size="sm"
+                      >
+                        ✕
+                      </Button>
+                    </CardTitle>
+                  </CardHeader>
+                </Card>
+              )}
+
+              {/* Transaction History Section */}
+              {showTransactionHistory && (
+                <Card className="bg-slate-800 border-slate-700">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-white text-sm flex items-center justify-between">
+                      📊 Transaction History
+                      <Button
+                        onClick={() => setShowTransactionHistory(false)}
+                        className="bg-gray-600 hover:bg-gray-700 text-xs"
+                        size="sm"
+                      >
+                        ✕
+                      </Button>
+                    </CardTitle>
+                  </CardHeader>
+                </Card>
+              )}
+
+              {/* Chat and Transaction Toggle Buttons */}
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => setShowChat(!showChat)}
+                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-sm"
+                  size="sm"
+                >
+                  💬 Chat
+                </Button>
+                <Button
+                  onClick={() => setShowTransactionHistory(!showTransactionHistory)}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-sm"
+                  size="sm"
+                >
+                  📊 History
+                </Button>
+              </div>
+            </div>
+
+            {/* Right Section - Game Board */}
+            <div className="flex-1 flex items-center justify-center min-h-0">
+              <MonopolyBoard
+                boardSize={gameState.gameRoom.boardSize}
+                properties={gameState.properties}
+                players={gameState.gameRoom.players}
+                currentPlayerTurn={gameState.currentPlayerTurn}
+                onTileClick={viewProperty}
+              />
             </div>
           </div>
         )}
@@ -758,23 +818,6 @@ export default function GameRoom() {
           </DialogContent>
         </Dialog>
       </div>
-
-      {/* Transaction History */}
-      <TransactionHistory 
-        roomId={roomId}
-        isVisible={showTransactionHistory}
-        onToggle={() => setShowTransactionHistory(!showTransactionHistory)}
-      />
-
-      {/* Chat Box */}
-      <ChatBox
-        roomId={roomId}
-        socket={socket}
-        currentPlayerId={playerId}
-        isVisible={showChat}
-        onToggle={() => setShowChat(!showChat)}
-        players={gameState?.gameRoom.players || []}
-      />
 
       {/* Auction */}
       {showAuction && currentAuction && (
