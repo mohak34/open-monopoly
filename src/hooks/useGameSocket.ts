@@ -60,11 +60,24 @@ interface ChatMessage {
   timestamp: number;
 }
 
+interface TradeProposal {
+  id: string;
+  fromPlayerId: string;
+  toPlayerId: string;
+  offeredProperties: string[];
+  offeredCash: number;
+  requestedProperties: string[];
+  requestedCash: number;
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED';
+  createdAt: Date;
+}
+
 export const useGameSocket = (roomId?: string, playerId?: string) => {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [currentTradeProposal, setCurrentTradeProposal] = useState<TradeProposal | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const { toast } = useToast();
 
@@ -130,8 +143,9 @@ export const useGameSocket = (roomId?: string, playerId?: string) => {
       });
     });
 
-    socket.on('trade-proposed', ({ tradeProposal, fromPlayer, toPlayer }) => {
+    socket.on('trade-proposed', ({ tradeProposal, fromPlayer }) => {
       if (tradeProposal.toPlayerId === playerId) {
+        setCurrentTradeProposal(tradeProposal);
         toast({
           title: "Trade Proposal",
           description: `${fromPlayer} wants to trade with you!`,
@@ -287,6 +301,10 @@ export const useGameSocket = (roomId?: string, playerId?: string) => {
   const canRollDice = isMyTurn && !gameState?.diceRolled;
   const canEndTurn = isMyTurn && gameState?.diceRolled;
 
+  const clearTradeProposal = () => {
+    setCurrentTradeProposal(null);
+  };
+
   return {
     gameState,
     isConnected,
@@ -296,6 +314,8 @@ export const useGameSocket = (roomId?: string, playerId?: string) => {
     isMyTurn,
     canRollDice,
     canEndTurn,
+    currentTradeProposal,
+    clearTradeProposal,
     setPlayerReady,
     rollDice,
     buyProperty,
