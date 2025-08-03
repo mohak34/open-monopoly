@@ -10,6 +10,7 @@ export interface Player {
   jailTurns: number;
   turnOrder: number;
   getOutOfJailFreeCards: number;
+  properties: string[];
 }
 
 export interface GameRoom {
@@ -37,6 +38,8 @@ export interface Property {
   hasHotel: boolean;
   ownerId?: string;
   isMortgaged: boolean;
+  housePrice?: number;
+  hotelPrice?: number;
 }
 
 export interface Auction {
@@ -59,4 +62,9 @@ export interface GameState {
   diceRolled: boolean;
   lastDiceRoll: [number, number];
   gameMessage: string;
+  lastCardDrawn?: {
+    type: 'CHANCE' | 'COMMUNITY_CHEST';
+    card: any;
+    playerId: string;
+  };
 }

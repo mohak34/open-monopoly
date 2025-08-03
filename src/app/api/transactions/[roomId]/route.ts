@@ -17,18 +17,6 @@ export async function GET(
             name: true,
           },
         },
-        fromPlayer: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        toPlayer: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
       },
       orderBy: {
         createdAt: "desc",
@@ -40,8 +28,8 @@ export async function GET(
       id: transaction.id,
       type: transaction.type,
       amount: transaction.amount,
-      fromPlayer: transaction.fromPlayer?.name,
-      toPlayer: transaction.toPlayer?.name,
+      fromPlayer: transaction.fromPlayer,
+      toPlayer: transaction.toPlayer,
       description: transaction.description,
       createdAt: transaction.createdAt.toISOString(),
       playerName: transaction.player?.name,

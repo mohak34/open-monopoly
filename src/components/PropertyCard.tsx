@@ -257,7 +257,7 @@ export function PropertyModal({
   onBuildHouse,
   onBuildHotel
 }: PropertyModalProps) {
-  const canBuy = !property.ownerId && property.price && currentPlayer?.cash >= property.price;
+  const canBuy = !property.ownerId && property.price && (currentPlayer?.cash || 0) >= property.price;
   const canBuild = owner && owner.id === currentPlayer?.id && property.type === 'PROPERTY';
 
   return (
@@ -274,8 +274,8 @@ export function PropertyModal({
           property={property}
           owner={owner}
           currentPlayer={currentPlayer}
-          canBuy={canBuy}
-          canBuild={canBuild}
+          canBuy={!!canBuy}
+          canBuild={!!canBuild}
           onBuy={onBuy}
           onBuildHouse={onBuildHouse}
           onBuildHotel={onBuildHotel}

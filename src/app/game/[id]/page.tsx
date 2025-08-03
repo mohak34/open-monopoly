@@ -7,37 +7,35 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Users, Play, Settings, DollarSign, Home, AlertTriangle, Dice1 as Dice } from 'lucide-react';
-import { io, Socket } from 'socket.io-client';
+import { Users, Play, DollarSign, AlertTriangle, Dice1 as Dice, Building, Home, ArrowRightLeft } from 'lucide-react';
+import { useGameSocket } from '@/hooks/useGameSocket';
 import MonopolyBoard from '@/components/MonopolyBoard';
-import PropertyCard, { PropertyModal } from '@/components/PropertyCard';
+import CardModal from '@/components/CardModal';
+import PropertyManagementModal from '@/components/PropertyManagementModal';
+import TradingModal from '@/components/TradingModal';
 import TransactionHistory from '@/components/TransactionHistory';
 import ChatBox from '@/components/ChatBox';
-import AuctionComponent from '@/components/Auction';
-import { Player, type GameRoom, Property, Auction, GameState } from '@/types/game';
+import Auction from '@/components/Auction';
+import { Toaster } from '@/components/ui/toaster';
+import { getRandomCard, findNearestRailroad, findNearestUtility } from '@/lib/cards';
+import type { Card as GameCard } from '@/lib/cards';
 
 export default function GameRoom() {
   const params = useParams();
   const roomId = params.id as string;
   const [playerId, setPlayerId] = useState<string>('');
   const [isClient, setIsClient] = useState(false);
-  
-  const [gameState, setGameState] = useState<GameState | null>(null);
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
-  const [gameStarted, setGameStarted] = useState(false);
   const [showStartDialog, setShowStartDialog] = useState(false);
   const [showBuyDialog, setShowBuyDialog] = useState(false);
-  const [showPropertyModal, setShowPropertyModal] = useState(false);
-  const [currentProperty, setCurrentProperty] = useState<Property | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [showPropertyManagement, setShowPropertyManagement] = useState(false);
   const [showTransactionHistory, setShowTransactionHistory] = useState(false);
   const [showChat, setShowChat] = useState(false);
-  const [currentAuction, setCurrentAuction] = useState<Auction | null>(null);
-  const [showAuction, setShowAuction] = useState(false);
+  const [showCardModal, setShowCardModal] = useState(false);
+  const [currentCard, setCurrentCard] = useState<GameCard | null>(null);
+  const [showTaxDialog, setShowTaxDialog] = useState(false);
+  const [showTradingModal, setShowTradingModal] = useState(false);
+  const [taxAmount, setTaxAmount] = useState(0);
 
-  // Client-side only initialization
   useEffect(() => {
     setIsClient(true);
     if (typeof window !== 'undefined') {
@@ -47,151 +45,30 @@ export default function GameRoom() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!isClient || !roomId || !playerId) {
-      if (isClient && (!roomId || !playerId)) {
-        console.warn('Missing roomId or playerId:', { roomId, playerId });
-        setError('Missing room ID or player ID. Please rejoin from the lobby.');
-        setTimeout(() => {
-          window.location.href = '/';
-        }, 3000);
-      }
-      return;
-    }
-
-    console.log('Connecting to game room:', { roomId, playerId });
-
-    // Add a longer delay before connecting to ensure database operations are complete
-    const connectTimer = setTimeout(() => {
-      const newSocket = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3000', {
-        path: '/api/socketio',
-        forceNew: true, // Force new connection to avoid stale state
-      });
-
-      newSocket.on('connect', () => {
-        console.log('Socket connected, joining room:', { roomId, playerId });
-        setIsConnected(true);
-        newSocket.emit('join-room', { roomId, playerId });
-      });
-
-      newSocket.on('disconnect', () => {
-        console.log('Socket disconnected');
-        setIsConnected(false);
-      });
-
-      newSocket.on('room-updated', (data: GameState) => {
-        console.log('Room updated:', data);
-        console.log('Looking for playerId:', playerId);
-        console.log('Available players in room:', data.gameRoom.players.map(p => ({ id: p.id, name: p.name })));
-        setGameState(data);
-        
-        const player = data.gameRoom.players.find(p => p.id === playerId);
-        console.log('Found player in room:', player);
-        setCurrentPlayer(player || null);
-        
-        if (!player) {
-          console.warn('Player not found in room after update.');
-          console.warn('Searching for playerId:', playerId);
-          console.warn('Available players:', data.gameRoom.players.map(p => ({ id: p.id, name: p.name })));
-          
-          // Detailed debugging of player ID comparison
-          const idComparisons = data.gameRoom.players.map(p => ({
-            id: p.id,
-            searchId: playerId,
-            exactMatch: p.id === playerId,
-            stringMatch: String(p.id) === String(playerId),
-            idType: typeof p.id,
-            searchType: typeof playerId,
-            idLength: p.id?.length,
-            searchLength: playerId?.length,
-            trimmedMatch: p.id?.trim() === playerId?.trim()
-          }));
-          
-          console.warn('Detailed ID comparison:', idComparisons);
-          
-          // Try to find player with more flexible matching
-          const flexibleMatch = data.gameRoom.players.find(p => 
-            String(p.id).trim() === String(playerId).trim()
-          );
-          
-          if (flexibleMatch) {
-            console.warn('Found player with flexible matching:', flexibleMatch);
-            setCurrentPlayer(flexibleMatch);
-            setError(null);
-            console.log('Player successfully connected via flexible matching');
-            return;
-          }
-          
-          // Don't set error immediately - let other mechanisms handle this
-        } else {
-          // Player found successfully, clear any existing error
-          setError(null);
-          console.log('Player successfully connected and found in room');
-        }
-        
-        setGameStarted(data.gameRoom.status === 'PLAYING');
-      });
-
-      newSocket.on('error', (data: { message: string }) => {
-        console.warn('Socket error:', data);
-        setError(data.message);
-        
-        // For "Player not found" errors, provide immediate redirect option
-        if (data.message.includes('Player not found in room')) {
-          setError(`${data.message} Click "Return to Lobby" to rejoin properly.`);
-          // Don't auto-redirect, let user choose
-        } else {
-          // For other errors, clear them after 5 seconds
-          setTimeout(() => setError(null), 5000);
-        }
-      });
-
-      newSocket.on('auction-started', (data: { auction: Auction }) => {
-        setCurrentAuction(data.auction);
-        setShowAuction(true);
-      });
-
-      newSocket.on('bid-placed', (data: { auction: Auction; playerName: string; bidAmount: number }) => {
-        setCurrentAuction(data.auction);
-      });
-
-      newSocket.on('auction-ended', (data: { auction: Auction }) => {
-        setCurrentAuction(data.auction);
-        setTimeout(() => {
-          setShowAuction(false);
-          setCurrentAuction(null);
-        }, 5000);
-      });
-
-      setSocket(newSocket);
-
-      return () => {
-        newSocket.close();
-      };
-    }, 500); // Increased delay to ensure database operations are complete
-
-    return () => {
-      clearTimeout(connectTimer);
-    };
-  }, [isClient, roomId, playerId]);
-
-  // Auto redirect if player not found in room (with delay to avoid race conditions)
-  useEffect(() => {
-    if (gameState && !currentPlayer && isClient && playerId && !error) {
-      console.log('Player not found in room, setting up redirect...');
-      // Increase delay to 8 seconds to allow more time for socket events
-      const timer = setTimeout(() => {
-        // Check that we still have gameState, no currentPlayer, and no error
-        if (gameState && !currentPlayer && !error) {
-          console.log('Player not found after delay - offering redirect option');
-          setError('Player not found in room. You may not be properly joined to this game room. Click "Return to Lobby" to rejoin properly.');
-          // Don't auto-redirect, let user decide
-        }
-      }, 8000); // Increased to 8 seconds
-      
-      return () => clearTimeout(timer);
-    }
-  }, [gameState, currentPlayer, isClient, playerId, error]);
+  const {
+    gameState,
+    isConnected,
+    error,
+    currentPlayer,
+    isMyTurn,
+    canRollDice,
+    canEndTurn,
+    setPlayerReady,
+    rollDice,
+    buyProperty,
+    endTurn,
+    buildHouse,
+    buildHotel,
+    payBail,
+    useGetOutOfJailCard,
+    sendChatMessage,
+    proposeTrade,
+    respondToTrade,
+    startAuction,
+    placeBid,
+    proposeGameEnd,
+    voteGameEnd,
+  } = useGameSocket(roomId, playerId);
 
   const startGame = async () => {
     if (!gameState || gameState.gameRoom.hostId !== playerId) return;
@@ -205,9 +82,6 @@ export default function GameRoom() {
 
       if (response.ok) {
         setShowStartDialog(false);
-        if (socket) {
-          socket.emit('game-started', { roomId });
-        }
       }
     } catch (error) {
       console.warn('Error starting game:', error);
@@ -215,68 +89,89 @@ export default function GameRoom() {
   };
 
   const toggleReady = () => {
-    if (socket && currentPlayer) {
-      socket.emit('player-ready', { roomId, playerId, isReady: !currentPlayer.isReady });
+    if (currentPlayer) {
+      setPlayerReady(!currentPlayer.isReady);
     }
   };
 
-  const rollDice = () => {
-    if (socket) {
-      socket.emit('roll-dice', { roomId, playerId });
-    }
-  };
-
-  const buyProperty = () => {
-    if (socket && currentProperty) {
-      socket.emit('buy-property', { roomId, playerId, propertyId: currentProperty.id });
+  const handleBuyProperty = () => {
+    const landedProperty = gameState?.diceRolled && currentPlayer
+      ? gameState.properties.find(p => p.position === currentPlayer.position)
+      : null;
+    
+    if (landedProperty) {
+      buyProperty(landedProperty.id);
       setShowBuyDialog(false);
-      setCurrentProperty(null);
     }
   };
 
-  const endTurn = () => {
-    if (socket) {
-      socket.emit('end-turn', { roomId, playerId });
+  const handleTileAction = () => {
+    if (!currentPlayer || !gameState?.diceRolled) return;
+
+    const landedProperty = gameState.properties.find(p => p.position === currentPlayer.position);
+    
+    if (landedProperty) {
+      if (landedProperty.type === 'CHANCE') {
+        const card = getRandomCard('CHANCE');
+        setCurrentCard(card);
+        setShowCardModal(true);
+      } else if (landedProperty.type === 'COMMUNITY_CHEST') {
+        const card = getRandomCard('COMMUNITY_CHEST');
+        setCurrentCard(card);
+        setShowCardModal(true);
+      } else if (landedProperty.type === 'TAX') {
+        const taxValue = landedProperty.name.includes('Income') ? 200 : 75;
+        setTaxAmount(taxValue);
+        setShowTaxDialog(true);
+      }
     }
   };
 
-  const buildHouse = () => {
-    if (socket && currentProperty) {
-      socket.emit('build-house', { roomId, playerId, propertyId: currentProperty.id });
-      setShowPropertyModal(false);
+  const executeCardAction = () => {
+    if (!currentCard || !currentPlayer) return;
+
+    const action = currentCard.action;
+    
+    switch (action.type) {
+      case 'MOVE_TO':
+        if (action.position !== undefined) {
+        }
+        break;
+      case 'MOVE_BACK':
+        if (action.value) {
+        }
+        break;
+      case 'COLLECT':
+        if (action.value) {
+        }
+        break;
+      case 'PAY':
+        if (action.value) {
+        }
+        break;
+      case 'JAIL':
+        break;
+      case 'GET_OUT_OF_JAIL':
+        break;
+      case 'STREET_REPAIRS':
+        if (action.perHouse && action.perHotel) {
+          const myProperties = gameState?.properties.filter(p => p.ownerId === playerId) || [];
+          const totalHouses = myProperties.reduce((sum, p) => sum + p.houses, 0);
+          const totalHotels = myProperties.filter(p => p.hasHotel).length;
+          const repairCost = (totalHouses * action.perHouse) + (totalHotels * action.perHotel);
+        }
+        break;
+      case 'PROPERTY_TAX':
+        if (action.value) {
+          const otherPlayers = gameState?.gameRoom.players.filter(p => p.id !== playerId) || [];
+          const totalTax = otherPlayers.length * Math.abs(action.value);
+        }
+        break;
     }
   };
 
-  const buildHotel = () => {
-    if (socket && currentProperty) {
-      socket.emit('build-hotel', { roomId, playerId, propertyId: currentProperty.id });
-      setShowPropertyModal(false);
-    }
-  };
-
-  const payBail = () => {
-    if (socket) {
-      socket.emit('pay-bail', { roomId, playerId });
-    }
-  };
-
-  const useGetOutOfJailCard = () => {
-    if (socket) {
-      socket.emit('use-get-out-of-jail-card', { roomId, playerId });
-    }
-  };
-
-  const startAuction = (propertyId: string) => {
-    if (socket && gameState && gameState.gameRoom.hostId === playerId) {
-      socket.emit('start-auction', { roomId, playerId, propertyId });
-    }
-  };
-
-  const viewProperty = (property: Property | null) => {
-    if (property) {
-      setCurrentProperty(property);
-      setShowPropertyModal(true);
-    }
+  const payTax = () => {
+    setShowTaxDialog(false);
   };
 
   const canStartGame = gameState && 
@@ -284,24 +179,20 @@ export default function GameRoom() {
     gameState.gameRoom.players.length >= 2 && 
     gameState.gameRoom.players.every(p => p.isReady);
 
-  const isMyTurn = gameState && currentPlayer && 
-    gameState.currentPlayerTurn === currentPlayer.id && 
-    !currentPlayer.isBankrupt;
-
-  const canRollDice = isMyTurn && !gameState?.diceRolled;
-  const canBuyProperty = isMyTurn && gameState?.diceRolled && currentProperty && 
-    !currentProperty.ownerId && currentProperty.price && currentPlayer?.cash >= currentProperty.price;
-  const canEndTurn = isMyTurn && gameState?.diceRolled && !currentPlayer?.inJail;
-  const canPayBail = isMyTurn && currentPlayer?.inJail && currentPlayer?.cash >= 50;
-  const canUseJailCard = isMyTurn && currentPlayer?.inJail && currentPlayer?.getOutOfJailFreeCards > 0;
+  const gameStarted = gameState?.gameRoom.status === 'PLAYING';
 
   const landedProperty = gameState?.diceRolled && currentPlayer
     ? gameState.properties.find(p => p.position === currentPlayer.position)
     : null;
 
+  const canBuyProperty = isMyTurn && gameState?.diceRolled && landedProperty && 
+    !landedProperty.ownerId && landedProperty.price && (currentPlayer?.cash || 0) >= landedProperty.price;
+
+  const canPayBail = isMyTurn && currentPlayer?.inJail && (currentPlayer?.cash || 0) >= 50;
+  const canUseJailCard = isMyTurn && currentPlayer?.inJail && (currentPlayer?.getOutOfJailFreeCards || 0) > 0;
+
   useEffect(() => {
     if (landedProperty && landedProperty.type === 'PROPERTY' && !landedProperty.ownerId && landedProperty.price) {
-      setCurrentProperty(landedProperty);
       setShowBuyDialog(true);
     }
   }, [landedProperty]);
@@ -344,18 +235,6 @@ export default function GameRoom() {
             >
               Refresh Page
             </button>
-            <button 
-              onClick={() => {
-                // Clear any cached state and retry
-                setGameState(null);
-                setCurrentPlayer(null);
-                setError(null);
-                window.location.reload();
-              }}
-              className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded font-medium"
-            >
-              Reset & Retry
-            </button>
           </div>
           <div className="mt-4 text-sm text-gray-500">
             Room ID: {roomId}<br />
@@ -368,6 +247,7 @@ export default function GameRoom() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4 flex flex-col">
+      <Toaster />
       <div className="max-w-7xl mx-auto flex-1 flex flex-col">
         <div className="flex justify-between items-center mb-6">
           <div>
@@ -509,12 +389,12 @@ export default function GameRoom() {
             </div>
           </div>
         ) : (
-          <div className="h-full flex gap-4">
-            {/* Left Sidebar */}
+          <div className="h-[calc(100vh-8rem)] flex gap-6">
+            {/* Left Stats Panel */}
             <div className="w-80 flex-shrink-0 space-y-4 overflow-y-auto">
-              {/* Game Message */}
+              {/* Game Status */}
               <Card className="bg-slate-800 border-slate-700">
-                <CardContent className="p-3">
+                <CardContent className="p-4">
                   <div className="text-center text-white font-medium text-sm">
                     {gameState.gameMessage}
                   </div>
@@ -523,54 +403,60 @@ export default function GameRoom() {
 
               {/* Current Player Info */}
               <Card className="bg-slate-800 border-slate-700">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-white flex items-center gap-2 text-sm">
-                    <div className={`w-4 h-4 rounded-full ${currentPlayer?.color}`} />
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <div className={`w-5 h-5 rounded-full ${currentPlayer?.color}`} />
                     {currentPlayer?.name}
-                    {isMyTurn && ' (Your Turn)'}
+                    {isMyTurn && <Badge className="bg-green-600">Your Turn</Badge>}
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-gray-300">Cash:</span>
-                    <span className="text-white font-medium">${currentPlayer?.cash.toLocaleString()}</span>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-gray-400 text-xs">Cash</span>
+                      <div className="text-white font-bold text-lg">${(currentPlayer?.cash || 0).toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <span className="text-gray-400 text-xs">Position</span>
+                      <div className="text-white font-bold text-lg">{currentPlayer?.position || 0}</div>
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-gray-300">Position:</span>
-                    <span className="text-white font-medium">{currentPlayer?.position}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-gray-300">Status:</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400 text-xs">Status</span>
                     <div className="flex items-center gap-1">
-                      {currentPlayer?.inJail && <span className="text-yellow-500 text-xs">🔒 In Jail</span>}
-                      {currentPlayer?.isBankrupt && <span className="text-red-500 text-xs">💀 Bankrupt</span>}
+                      {currentPlayer?.inJail && <Badge variant="secondary" className="bg-yellow-600">🔒 In Jail</Badge>}
+                      {currentPlayer?.isBankrupt && <Badge variant="destructive">💀 Bankrupt</Badge>}
                       {!currentPlayer?.inJail && !currentPlayer?.isBankrupt && (
-                        <span className="text-green-500 text-xs">✓ Active</span>
+                        <Badge className="bg-green-600">✓ Active</Badge>
                       )}
                     </div>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400 text-xs">Get Out of Jail Cards</span>
+                    <div className="text-white font-medium">{currentPlayer?.getOutOfJailFreeCards || 0}</div>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Game Actions */}
+              {/* Actions Panel */}
               <Card className="bg-slate-800 border-slate-700">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-white text-sm">Actions</CardTitle>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-white">Game Actions</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
                     {gameState.diceRolled && (
-                      <div className="text-center">
+                      <div className="text-center bg-slate-700 p-3 rounded-lg">
                         <div className="text-white mb-2 text-sm">Last Roll:</div>
-                        <div className="flex justify-center gap-2">
-                          <div className="w-8 h-8 bg-white rounded flex items-center justify-center text-black font-bold">
+                        <div className="flex justify-center gap-3 mb-2">
+                          <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-black font-bold text-lg shadow-lg">
                             {gameState.lastDiceRoll[0]}
                           </div>
-                          <div className="w-8 h-8 bg-white rounded flex items-center justify-center text-black font-bold">
+                          <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-black font-bold text-lg shadow-lg">
                             {gameState.lastDiceRoll[1]}
                           </div>
                         </div>
-                        <div className="text-white mt-1 text-sm">
+                        <div className="text-white font-bold">
                           Total: {gameState.lastDiceRoll[0] + gameState.lastDiceRoll[1]}
                         </div>
                       </div>
@@ -578,34 +464,34 @@ export default function GameRoom() {
                     
                     {currentPlayer?.inJail && (
                       <div className="bg-yellow-900 border border-yellow-600 rounded-lg p-3">
-                        <div className="text-yellow-200 text-xs font-medium mb-2">
+                        <div className="text-yellow-200 text-sm font-medium mb-3">
                           🔒 You are in jail! ({currentPlayer.jailTurns}/3 attempts)
                         </div>
                         <div className="space-y-2">
                           {canRollDice && (
                             <Button
                               onClick={rollDice}
-                              className="w-full bg-blue-600 hover:bg-blue-700 text-sm"
+                              className="w-full bg-blue-600 hover:bg-blue-700"
                               size="sm"
                             >
-                              <Dice className="w-3 h-3 mr-2" />
+                              <Dice className="w-4 h-4 mr-2" />
                               Roll for Doubles
                             </Button>
                           )}
                           {canPayBail && (
                             <Button
                               onClick={payBail}
-                              className="w-full bg-yellow-600 hover:bg-yellow-700 text-sm"
+                              className="w-full bg-yellow-600 hover:bg-yellow-700"
                               size="sm"
                             >
-                              <DollarSign className="w-3 h-3 mr-2" />
+                              <DollarSign className="w-4 h-4 mr-2" />
                               Pay $50 Bail
                             </Button>
                           )}
                           {canUseJailCard && (
                             <Button
                               onClick={useGetOutOfJailCard}
-                              className="w-full bg-green-600 hover:bg-green-700 text-sm"
+                              className="w-full bg-green-600 hover:bg-green-700"
                               size="sm"
                             >
                               🎫 Use Jail Free Card
@@ -618,10 +504,10 @@ export default function GameRoom() {
                     {canRollDice && !currentPlayer?.inJail && (
                       <Button
                         onClick={rollDice}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-sm"
-                        size="sm"
+                        className="w-full bg-blue-600 hover:bg-blue-700"
+                        size="default"
                       >
-                        <Dice className="w-3 h-3 mr-2" />
+                        <Dice className="w-4 h-4 mr-2" />
                         Roll Dice
                       </Button>
                     )}
@@ -629,8 +515,8 @@ export default function GameRoom() {
                     {canEndTurn && (
                       <Button
                         onClick={endTurn}
-                        className="w-full bg-gray-600 hover:bg-gray-700 text-sm"
-                        size="sm"
+                        className="w-full bg-gray-600 hover:bg-gray-700"
+                        size="default"
                       >
                         End Turn
                       </Button>
@@ -639,31 +525,42 @@ export default function GameRoom() {
                 </CardContent>
               </Card>
 
-              {/* Players List */}
+              {/* All Players */}
               <Card className="bg-slate-800 border-slate-700">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-white text-sm">Players</CardTitle>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-white">All Players</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {gameState.gameRoom.players.map((player) => (
                       <div
                         key={player.id}
-                        className={`flex items-center justify-between p-2 rounded text-sm ${
+                        className={`flex items-center justify-between p-3 rounded-lg ${
                           player.id === gameState.currentPlayerTurn
-                            ? 'bg-slate-600'
+                            ? 'bg-blue-600/20 border border-blue-500'
                             : 'bg-slate-700'
                         }`}
                       >
-                        <div className="flex items-center gap-2">
-                          <div className={`w-3 h-3 rounded-full ${player.color}`} />
-                          <span className="text-white text-xs">
-                            {player.name}
-                            {player.id === playerId && ' (You)'}
-                          </span>
+                        <div className="flex items-center gap-3">
+                          <div className={`w-4 h-4 rounded-full ${player.color}`} />
+                          <div>
+                            <div className="text-white font-medium text-sm">
+                              {player.name}
+                              {player.id === playerId && ' (You)'}
+                            </div>
+                            <div className="text-gray-400 text-xs">
+                              Position: {player.position}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-400">
-                          ${player.cash}
+                        <div className="text-right">
+                          <div className="text-white font-medium text-sm">
+                            ${player.cash.toLocaleString()}
+                          </div>
+                          <div className="flex items-center gap-1 text-xs">
+                            {player.inJail && <span className="text-yellow-500">🔒</span>}
+                            {player.isBankrupt && <span className="text-red-500">💀</span>}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -671,54 +568,95 @@ export default function GameRoom() {
                 </CardContent>
               </Card>
 
-              {/* Chat Section */}
-              {showChat && (
-                <Card className="bg-slate-800 border-slate-700">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-white text-sm flex items-center justify-between">
-                      💬 Chat
-                      <Button
-                        onClick={() => setShowChat(false)}
-                        className="bg-gray-600 hover:bg-gray-700 text-xs"
-                        size="sm"
-                      >
-                        ✕
-                      </Button>
-                    </CardTitle>
-                  </CardHeader>
-                </Card>
-              )}
+              {/* Property Management */}
+              <Card className="bg-slate-800 border-slate-700">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-white">My Properties</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {gameState.properties
+                      .filter(prop => prop.ownerId === playerId)
+                      .map((property) => (
+                        <div
+                          key={property.id}
+                          className="flex items-center justify-between p-2 bg-slate-700 rounded text-sm"
+                        >
+                          <div>
+                            <div className="text-white font-medium">{property.name}</div>
+                            <div className="text-gray-400 text-xs">
+                              {property.houses > 0 && `🏠 ${property.houses} houses`}
+                              {property.hasHotel && `🏨 Hotel`}
+                              {property.isMortgaged && ' (Mortgaged)'}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-white">${property.rent}</div>
+                            <div className="text-gray-400 text-xs">rent</div>
+                          </div>
+                        </div>
+                      ))}
+                    {gameState.properties.filter(prop => prop.ownerId === playerId).length === 0 && (
+                      <div className="text-gray-400 text-sm text-center py-4">
+                        No properties owned
+                      </div>
+                    )}
+                  </div>
+                  
+                  {gameState.properties.filter(prop => prop.ownerId === playerId).length > 0 && (
+                    <Button
+                      onClick={() => setShowPropertyManagement(true)}
+                      className="w-full mt-3 bg-green-600 hover:bg-green-700"
+                      size="sm"
+                    >
+                      <Building className="w-4 h-4 mr-2" />
+                      Manage Properties
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
 
-              {/* Transaction History Section */}
-              {showTransactionHistory && (
-                <Card className="bg-slate-800 border-slate-700">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-white text-sm flex items-center justify-between">
-                      📊 Transaction History
-                      <Button
-                        onClick={() => setShowTransactionHistory(false)}
-                        className="bg-gray-600 hover:bg-gray-700 text-xs"
-                        size="sm"
-                      >
-                        ✕
-                      </Button>
-                    </CardTitle>
-                  </CardHeader>
-                </Card>
-              )}
+              {/* Quick Actions */}
+              <Card className="bg-slate-800 border-slate-700">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-white">Quick Actions</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    <Button
+                      onClick={handleTileAction}
+                      className="w-full bg-purple-600 hover:bg-purple-700"
+                      size="sm"
+                      disabled={!isMyTurn || !gameState?.diceRolled}
+                    >
+                      Check Current Tile
+                    </Button>
+                    
+                    <Button
+                      onClick={() => setShowTradingModal(true)}
+                      className="w-full bg-orange-600 hover:bg-orange-700"
+                      size="sm"
+                      disabled={!isMyTurn}
+                    >
+                      <ArrowRightLeft className="w-4 h-4 mr-2" />
+                      Propose Trade
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
 
-              {/* Chat and Transaction Toggle Buttons */}
+              {/* Chat & History */}
               <div className="flex gap-2">
                 <Button
                   onClick={() => setShowChat(!showChat)}
-                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-sm"
+                  className="flex-1 bg-purple-600 hover:bg-purple-700"
                   size="sm"
                 >
                   💬 Chat
                 </Button>
                 <Button
                   onClick={() => setShowTransactionHistory(!showTransactionHistory)}
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-sm"
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700"
                   size="sm"
                 >
                   📊 History
@@ -726,14 +664,13 @@ export default function GameRoom() {
               </div>
             </div>
 
-            {/* Right Section - Game Board */}
-            <div className="flex-1 flex items-center justify-center min-h-0">
+            {/* Right Board Area */}
+            <div className="flex-1 flex items-center justify-center bg-slate-800/30 rounded-lg p-4">
               <MonopolyBoard
-                boardSize={gameState.gameRoom.boardSize}
                 properties={gameState.properties}
                 players={gameState.gameRoom.players}
                 currentPlayerTurn={gameState.currentPlayerTurn}
-                onTileClick={viewProperty}
+                onTileClick={() => {}}
               />
             </div>
           </div>
@@ -763,31 +700,31 @@ export default function GameRoom() {
             <DialogHeader>
               <DialogTitle>Buy Property</DialogTitle>
               <DialogDescription>
-                {currentProperty && (
+                {landedProperty && (
                   <>
-                    Do you want to buy {currentProperty.name} for ${currentProperty.price}?
+                    Do you want to buy {landedProperty.name} for ${landedProperty.price}?
                   </>
                 )}
               </DialogDescription>
             </DialogHeader>
-            {currentProperty && (
+            {landedProperty && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <span className="text-gray-400">Price:</span>
-                    <div className="text-white">${currentProperty.price}</div>
+                    <div className="text-white">${landedProperty.price}</div>
                   </div>
                   <div>
                     <span className="text-gray-400">Rent:</span>
-                    <div className="text-white">${currentProperty.rent}</div>
+                    <div className="text-white">${landedProperty.rent}</div>
                   </div>
                   <div>
                     <span className="text-gray-400">Color Group:</span>
-                    <div className="text-white">{currentProperty.colorGroup || 'None'}</div>
+                    <div className="text-white">{landedProperty.colorGroup || 'None'}</div>
                   </div>
                   <div>
                     <span className="text-gray-400">Your Cash:</span>
-                    <div className="text-white">${currentPlayer?.cash.toLocaleString()}</div>
+                    <div className="text-white">${(currentPlayer?.cash || 0).toLocaleString()}</div>
                   </div>
                 </div>
                 <div className="flex gap-3">
@@ -797,7 +734,7 @@ export default function GameRoom() {
                   {gameState?.gameRoom.hostId === playerId && (
                     <Button 
                       onClick={() => {
-                        startAuction(currentProperty.id);
+                        startAuction(landedProperty.id);
                         setShowBuyDialog(false);
                       }}
                       className="flex-1 bg-purple-600 hover:bg-purple-700"
@@ -806,7 +743,7 @@ export default function GameRoom() {
                     </Button>
                   )}
                   <Button 
-                    onClick={buyProperty} 
+                    onClick={handleBuyProperty} 
                     className="flex-1 bg-green-600 hover:bg-green-700"
                     disabled={!canBuyProperty}
                   >
@@ -817,26 +754,84 @@ export default function GameRoom() {
             )}
           </DialogContent>
         </Dialog>
-      </div>
 
-      {/* Auction */}
-      {showAuction && currentAuction && (
-        <div className="fixed top-4 right-4 z-50 w-96">
-          <AuctionComponent
-            auction={currentAuction}
-            socket={socket}
-            currentPlayerId={playerId}
-            roomId={roomId}
-            players={gameState?.gameRoom.players || []}
-            onAuctionEnd={() => {
-              setTimeout(() => {
-                setShowAuction(false);
-                setCurrentAuction(null);
-              }, 3000);
-            }}
-          />
-        </div>
-      )}
+        <Dialog open={showTaxDialog} onOpenChange={setShowTaxDialog}>
+          <DialogContent className="bg-slate-800 border-slate-700 text-white">
+            <DialogHeader>
+              <DialogTitle>Tax Payment Required</DialogTitle>
+              <DialogDescription>
+                You must pay ${taxAmount} in taxes.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-red-400">${taxAmount}</div>
+                <div className="text-gray-400">Tax Amount</div>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Your Cash:</span>
+                <span className="text-white">${(currentPlayer?.cash || 0).toLocaleString()}</span>
+              </div>
+              <Button 
+                onClick={payTax} 
+                className="w-full bg-red-600 hover:bg-red-700"
+                disabled={(currentPlayer?.cash || 0) < taxAmount}
+              >
+                Pay Tax
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <CardModal
+          isOpen={showCardModal}
+          onCloseAction={() => setShowCardModal(false)}
+          card={currentCard}
+          onExecuteAction={executeCardAction}
+        />
+
+        <PropertyManagementModal
+          isOpen={showPropertyManagement}
+          onCloseAction={() => setShowPropertyManagement(false)}
+          properties={gameState?.properties.filter(p => p.ownerId === playerId) || []}
+          playerCash={currentPlayer?.cash || 0}
+          onBuildHouseAction={(propertyId) => buildHouse(propertyId)}
+          onBuildHotelAction={(propertyId) => buildHotel(propertyId)}
+          onSellHouseAction={(propertyId) => {
+            // Implement sell house logic
+          }}
+          onMortgageAction={(propertyId) => {
+            // Implement mortgage logic
+          }}
+        />
+
+        <TradingModal
+          isOpen={showTradingModal}
+          onCloseAction={() => setShowTradingModal(false)}
+          currentPlayer={currentPlayer!}
+          players={gameState?.gameRoom.players || []}
+          properties={gameState?.properties || []}
+          onProposeTradeAction={(toPlayerId, offeredProperties, offeredCash, requestedProperties, requestedCash) => {
+            proposeTrade(toPlayerId, offeredProperties, offeredCash, requestedProperties, requestedCash);
+          }}
+        />
+
+        {/* Add chat and transaction history with correct props */}
+        <ChatBox
+          roomId={roomId}
+          socket={null}
+          currentPlayerId={playerId}
+          isVisible={showChat}
+          onToggle={() => setShowChat(!showChat)}
+          players={gameState?.gameRoom.players || []}
+        />
+
+        <TransactionHistory
+          roomId={roomId}
+          isVisible={showTransactionHistory}
+          onToggle={() => setShowTransactionHistory(!showTransactionHistory)}
+        />
+      </div>
     </div>
   );
 }

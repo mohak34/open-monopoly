@@ -9,7 +9,7 @@ import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Timer, Gavel, DollarSign, Users, AlertTriangle } from 'lucide-react';
 import { Socket } from 'socket.io-client';
-import { Player, Auction } from '@/types/game';
+import { type Player, type Auction } from '@/types/game';
 
 interface AuctionProps {
   auction: Auction | null;

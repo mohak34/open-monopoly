@@ -42,6 +42,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Assign turn order to players randomly
+    const shuffledPlayers = [...gameRoom.players].sort(() => Math.random() - 0.5);
+    await Promise.all(
+      shuffledPlayers.map((player, index) =>
+        db.player.update({
+          where: { id: player.id },
+          data: { turnOrder: index },
+        })
+      )
+    );
+
     await db.gameRoom.update({
       where: { id: roomId },
       data: { status: 'PLAYING' },
@@ -80,8 +91,8 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function generateBoardProperties(boardSize: number, gameId: string) {
-  const properties = [];
+function generateBoardProperties(boardSize: number, gameId: string): any[] {
+  const properties: any[] = [];
   
   // Corner positions
   properties.push({
