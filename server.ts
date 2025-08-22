@@ -35,8 +35,11 @@ async function createCustomServer() {
     const io = new Server(server, {
       path: '/api/socketio',
       cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
+        origin: process.env.NODE_ENV === 'production'
+          ? process.env.ALLOWED_ORIGINS?.split(',') || false
+          : ['http://localhost:3000', 'http://127.0.0.1:3000'],
+        methods: ["GET", "POST"],
+        credentials: true
       }
     });
 

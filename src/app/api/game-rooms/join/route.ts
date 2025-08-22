@@ -1,16 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { joinGameRoomSchema, handleError, createErrorResponse } from '@/lib/utils';
 
 export async function POST(request: NextRequest) {
   try {
-    const { roomId, playerName, playerColor, playerId } = await request.json();
-
-    if (!roomId || !playerName || !playerColor || !playerId) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      );
-    }
+    const body = await request.json();
+    const { roomId, playerName, playerColor, playerId } = joinGameRoomSchema.parse(body);
 
     const gameRoom = await db.gameRoom.findUnique({
       where: { id: roomId },
@@ -102,10 +97,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(updatedRoom);
   } catch (error) {
-    console.error('Error joining game room:', error);
+    const appError = handleError(error);
+    console.error('Error joining game room:', appError.message);
     return NextResponse.json(
-      { error: 'Failed to join game room' },
-      { status: 500 }
+      createErrorResponse(appError),
+      { status: appError.statusCode }
     );
   }
 }

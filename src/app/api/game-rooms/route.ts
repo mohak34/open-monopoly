@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { createGameRoomSchema, handleError, createErrorResponse } from '@/lib/utils';
 
 export async function GET(request: NextRequest) {
   try {
@@ -70,14 +71,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { name, boardSize, maxPlayers, hostId } = await request.json();
-
-    if (!name || !boardSize || !maxPlayers || !hostId) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      );
-    }
+    const body = await request.json();
+    const { name, boardSize, maxPlayers, hostId } = createGameRoomSchema.parse(body);
 
     const gameRoom = await db.gameRoom.create({
       data: {
@@ -99,10 +94,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(gameRoom);
   } catch (error) {
-    console.error('Error creating game room:', error);
+    const appError = handleError(error);
+    console.error('Error creating game room:', appError.message);
     return NextResponse.json(
-      { error: 'Failed to create game room' },
-      { status: 500 }
+      createErrorResponse(appError),
+      { status: appError.statusCode }
     );
   }
 }

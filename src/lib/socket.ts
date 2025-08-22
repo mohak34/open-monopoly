@@ -1,65 +1,22 @@
-import { Server } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import { db } from '@/lib/db';
 import { TransactionType } from '@prisma/client';
+import {
+  GameState,
+  Player,
+  Property,
+  Card,
+  TradeProposal,
+  Auction,
+  GameRoom
+} from '@/types/game';
+import { validateSocketEvent, handleError } from '@/lib/utils';
 
-interface Player {
-  id: string;
-  name: string;
-  color: string;
-  cash: number;
-  position: number;
-  inJail: boolean;
-  isReady: boolean;
-  isBankrupt: boolean;
-  jailTurns: number;
-  turnOrder: number;
-  getOutOfJailFreeCards: number;
-}
+// Using interfaces from @/types/game
 
-interface GameRoom {
-  id: string;
-  name: string;
-  boardSize: number;
-  maxPlayers: number;
-  status: 'WAITING' | 'PLAYING' | 'FINISHED';
-  players: Player[];
-  hostId: string;
-}
+// Using GameRoom interface from @/types/game
 
-interface Property {
-  id: string;
-  name: string;
-  type: string;
-  position: number;
-  price?: number;
-  rent?: number;
-  rentWithHouse?: number;
-  rentWithHotel?: number;
-  colorGroup?: string;
-  houses: number;
-  hasHotel: boolean;
-  ownerId?: string;
-  isMortgaged: boolean;
-}
-
-interface GameState {
-  gameRoom: GameRoom;
-  properties: Property[];
-  currentPlayerTurn: string;
-  diceRolled: boolean;
-  lastDiceRoll: [number, number];
-  gameMessage: string;
-}
-
-interface Card {
-  id: string;
-  type: 'CHANCE' | 'COMMUNITY_CHEST';
-  text: string;
-  action: string;
-  amount?: number;
-  moveTo?: number;
-  getOutOfJailFree?: boolean;
-}
+// Using Property, GameState, and Card interfaces from @/types/game
 
 const chanceCards: Card[] = [
   { id: 'c1', type: 'CHANCE', text: 'Advance to GO', action: 'MOVE_TO', moveTo: 0 },
@@ -87,30 +44,7 @@ const communityChestCards: Card[] = [
   { id: 'cc10', type: 'COMMUNITY_CHEST', text: 'You have won second prize in a beauty contest. Collect $10', action: 'COLLECT_MONEY', amount: 10 },
 ];
 
-interface TradeProposal {
-  id: string;
-  fromPlayerId: string;
-  toPlayerId: string;
-  offeredProperties: string[];
-  offeredCash: number;
-  requestedProperties: string[];
-  requestedCash: number;
-  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED';
-  createdAt: Date;
-}
-
-interface Auction {
-  id: string;
-  propertyId: string;
-  propertyName: string;
-  startingBid: number;
-  currentBid: number;
-  currentWinner: string | null;
-  startTime: Date;
-  endTime: Date;
-  participants: string[];
-  status: 'ACTIVE' | 'ENDED' | 'CANCELLED';
-}
+// Using TradeProposal and Auction interfaces from @/types/game
 
 const activeAuctions = new Map<string, Auction>();
 const gameRooms = new Map<string, GameState>();
@@ -354,20 +288,64 @@ async function checkBankruptcy(gameState: GameState, roomId: string) {
 
 function calculateRent(property: Property, ownedInGroup: number = 0): number {
   if (!property.rent) return 0;
-  
+
   if (property.hasHotel && property.rentWithHotel) {
     return property.rentWithHotel;
   }
-  
+
   if (property.houses > 0 && property.rentWithHouse) {
     return property.rentWithHouse * property.houses;
   }
-  
+
   if (ownedInGroup > 1 && property.colorGroup) {
     return property.rent * 2;
   }
-  
+
   return property.rent;
+}
+
+function canBuyProperty(player: Player, property: Property): boolean {
+  return !property.ownerId &&
+         property.price !== undefined &&
+         player.cash >= property.price;
+}
+
+function canBuildHouse(player: Player, property: Property, gameState: GameState): boolean {
+  if (!property.ownerId || property.ownerId !== player.id) return false;
+  if (property.type !== 'PROPERTY') return false;
+  if (property.houses >= 4) return false; // Max 4 houses before hotel
+  if (property.hasHotel) return false;
+
+  // Check if player owns all properties in the color group
+  const colorGroupProperties = gameState.properties.filter(p =>
+    p.colorGroup === property.colorGroup && p.type === 'PROPERTY'
+  );
+  const ownsAllInGroup = colorGroupProperties.every(p => p.ownerId === player.id);
+
+  if (!ownsAllInGroup) return false;
+
+  // Check if building is even (must build evenly across color group)
+  const minHousesInGroup = Math.min(...colorGroupProperties.map(p => p.houses));
+  if (property.houses > minHousesInGroup) return false;
+
+  return property.housePrice !== undefined && player.cash >= property.housePrice;
+}
+
+function canBuildHotel(player: Player, property: Property, gameState: GameState): boolean {
+  if (!property.ownerId || property.ownerId !== player.id) return false;
+  if (property.type !== 'PROPERTY') return false;
+  if (property.houses !== 4) return false; // Need 4 houses first
+  if (property.hasHotel) return false;
+
+  // Check if player owns all properties in the color group
+  const colorGroupProperties = gameState.properties.filter(p =>
+    p.colorGroup === property.colorGroup && p.type === 'PROPERTY'
+  );
+  const ownsAllInGroup = colorGroupProperties.every(p => p.ownerId === player.id);
+
+  if (!ownsAllInGroup) return false;
+
+  return property.hotelPrice !== undefined && player.cash >= property.hotelPrice;
 }
 
 export const setupSocket = (io: Server) => {
@@ -376,8 +354,10 @@ export const setupSocket = (io: Server) => {
   io.on('connection', (socket) => {
     console.log('Client connected:', socket.id);
 
-    socket.on('join-room', async ({ roomId, playerId }) => {
+    socket.on('join-room', async (data) => {
       try {
+        const validatedData = validateSocketEvent<{ roomId: string; playerId: string }>('join-room', data);
+        const { roomId, playerId } = validatedData;
         socket.join(roomId);
         console.log(`Player ${playerId} attempting to join room ${roomId}`);
         
@@ -445,8 +425,9 @@ export const setupSocket = (io: Server) => {
         await attemptJoin();
 
       } catch (error) {
-        console.error('Error joining room:', error);
-        socket.emit('error', { message: 'Failed to join room' });
+        const appError = handleError(error);
+        console.error('Error joining room:', appError.message);
+        socket.emit('error', { message: appError.message });
       }
     });
 
@@ -717,7 +698,8 @@ export const setupSocket = (io: Server) => {
 
         if (landedProperty) {
           gameMessage += ` (${landedProperty.name})`;
-          
+
+          // Handle different property types
           if (landedProperty.type === 'GO') {
             const goAmount = 200;
             currentPlayer.cash += goAmount;

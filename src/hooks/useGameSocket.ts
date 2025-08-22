@@ -3,55 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { useToast } from "@/hooks/use-toast";
+import { Player, Property, GameRoom, GameState } from "@/types/game";
 
-interface Player {
-  id: string;
-  name: string;
-  color: string;
-  cash: number;
-  position: number;
-  inJail: boolean;
-  isReady: boolean;
-  isBankrupt: boolean;
-  jailTurns: number;
-  turnOrder: number;
-  getOutOfJailFreeCards: number;
-}
-
-interface Property {
-  id: string;
-  name: string;
-  type: string;
-  position: number;
-  price?: number;
-  rent?: number;
-  rentWithHouse?: number;
-  rentWithHotel?: number;
-  colorGroup?: string;
-  houses: number;
-  hasHotel: boolean;
-  ownerId?: string;
-  isMortgaged: boolean;
-}
-
-interface GameRoom {
-  id: string;
-  name: string;
-  boardSize: number;
-  maxPlayers: number;
-  status: 'WAITING' | 'PLAYING' | 'FINISHED';
-  players: Player[];
-  hostId: string;
-}
-
-interface GameState {
-  gameRoom: GameRoom;
-  properties: Property[];
-  currentPlayerTurn: string;
-  diceRolled: boolean;
-  lastDiceRoll: [number, number];
-  gameMessage: string;
-}
+// Using interfaces from @/types/game
 
 interface ChatMessage {
   playerId: string;
